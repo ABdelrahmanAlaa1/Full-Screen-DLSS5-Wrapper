@@ -19,11 +19,6 @@ using Pair = NrParameterValue;
     return Pair{ name, NgxValue{ value } };
 }
 
-[[nodiscard]] Pair Resource(NrParameter name, ResourceId id) noexcept
-{
-    return Pair{ name, NgxValue{ id } };
-}
-
 [[nodiscard]] std::uint32_t BoolCode(bool value) noexcept
 {
     return value ? 1u : 0u;
@@ -44,51 +39,6 @@ using Pair = NrParameterValue;
              Float(NrParameter::SkinStructureStrength, t.skinStructure.Get()),
              UInt(NrParameter::UseAutoMask, BoolCode(t.autoMask)),
              UInt(NrParameter::UiCorrection, BoolCode(t.uiCorrection)) };
-}
-
-[[nodiscard]] std::array<Pair, 5> CreationPairs(const Extent& work) noexcept
-{
-    return { UInt(NrParameter::Enabled, 1u), UInt(NrParameter::Width, work.width.Get()), UInt(NrParameter::Height, work.height.Get()), UInt(NrParameter::CreationNodeMask, 1u),
-             UInt(NrParameter::VisibilityNodeMask, 1u) };
-}
-
-[[nodiscard]] std::array<Pair, 9> ResourcePairs(const EvaluateNr& e) noexcept
-{
-    return { Resource(NrParameter::Color, e.io.color),
-             Resource(NrParameter::Depth, e.io.depth),
-             Resource(NrParameter::MVec, e.io.motionVectors),
-             Resource(NrParameter::Output, e.io.output),
-             UInt(NrParameter::Enabled, 1u),
-             UInt(NrParameter::Width, e.work.width.Get()),
-             UInt(NrParameter::Height, e.work.height.Get()),
-             UInt(NrParameter::DepthInverted, BoolCode(e.depthInverted)),
-             UInt(NrParameter::Reset, BoolCode(e.reset)) };
-}
-
-[[nodiscard]] std::array<Pair, 8> ColorSubrectPairs(const EvaluateNr& e) noexcept
-{
-    return { UInt(NrParameter::ColorSubrectBaseX, 0u),
-             UInt(NrParameter::ColorSubrectBaseY, 0u),
-             UInt(NrParameter::ColorSubrectWidth, e.work.width.Get()),
-             UInt(NrParameter::ColorSubrectHeight, e.work.height.Get()),
-             UInt(NrParameter::OutputSubrectBaseX, 0u),
-             UInt(NrParameter::OutputSubrectBaseY, 0u),
-             UInt(NrParameter::OutputSubrectWidth, e.work.width.Get()),
-             UInt(NrParameter::OutputSubrectHeight, e.work.height.Get()) };
-}
-
-[[nodiscard]] std::array<Pair, 10> GuidePairs(const EvaluateNr& e) noexcept
-{
-    return { UInt(NrParameter::DepthSubrectBaseX, 0u),
-             UInt(NrParameter::DepthSubrectBaseY, 0u),
-             UInt(NrParameter::DepthSubrectWidth, e.guide.width.Get()),
-             UInt(NrParameter::DepthSubrectHeight, e.guide.height.Get()),
-             UInt(NrParameter::MVecSubrectBaseX, 0u),
-             UInt(NrParameter::MVecSubrectBaseY, 0u),
-             UInt(NrParameter::MVecSubrectWidth, e.guide.width.Get()),
-             UInt(NrParameter::MVecSubrectHeight, e.guide.height.Get()),
-             Float(NrParameter::MVecScaleX, e.mvScaleX.Get()),
-             Float(NrParameter::MVecScaleY, e.mvScaleY.Get()) };
 }
 
 } // namespace
@@ -151,11 +101,51 @@ std::uint32_t StyleCode(NrStyle style) noexcept
 
 Result<NrParameterList, infra::CapacityExceeded> NrCreationParameters(const NrTuning& tuning, const Extent& work) noexcept
 {
+    static constexpr auto CreationPairs = [] [[nodiscard]] (const Extent& work) noexcept -> std::array<Pair, 5> {
+        return { UInt(NrParameter::Enabled, 1u), UInt(NrParameter::Width, work.width.Get()), UInt(NrParameter::Height, work.height.Get()), UInt(NrParameter::CreationNodeMask, 1u),
+                 UInt(NrParameter::VisibilityNodeMask, 1u) };
+    };
     return PushAll(NrParameterList{}, CreationPairs(work)).and_then([&tuning](const NrParameterList& list) { return PushAll(list, TuningPairs(tuning)); });
 }
 
 Result<NrParameterList, infra::CapacityExceeded> NrEvaluationParameters(const NrTuning& tuning, const EvaluateNr& evaluate) noexcept
 {
+    static constexpr auto ResourcePairs = [] [[nodiscard]] (const EvaluateNr& e) noexcept -> std::array<Pair, 9> {
+        static constexpr auto Resource = [] [[nodiscard]] (NrParameter name, ResourceId id) noexcept -> Pair { return Pair{ name, NgxValue{ id } }; };
+        return { Resource(NrParameter::Color, e.io.color),
+                 Resource(NrParameter::Depth, e.io.depth),
+                 Resource(NrParameter::MVec, e.io.motionVectors),
+                 Resource(NrParameter::Output, e.io.output),
+                 UInt(NrParameter::Enabled, 1u),
+                 UInt(NrParameter::Width, e.work.width.Get()),
+                 UInt(NrParameter::Height, e.work.height.Get()),
+                 UInt(NrParameter::DepthInverted, BoolCode(e.depthInverted)),
+                 UInt(NrParameter::Reset, BoolCode(e.reset)) };
+    };
+
+    static constexpr auto ColorSubrectPairs = [] [[nodiscard]] (const EvaluateNr& e) noexcept -> std::array<Pair, 8> {
+        return { UInt(NrParameter::ColorSubrectBaseX, 0u),
+                 UInt(NrParameter::ColorSubrectBaseY, 0u),
+                 UInt(NrParameter::ColorSubrectWidth, e.work.width.Get()),
+                 UInt(NrParameter::ColorSubrectHeight, e.work.height.Get()),
+                 UInt(NrParameter::OutputSubrectBaseX, 0u),
+                 UInt(NrParameter::OutputSubrectBaseY, 0u),
+                 UInt(NrParameter::OutputSubrectWidth, e.work.width.Get()),
+                 UInt(NrParameter::OutputSubrectHeight, e.work.height.Get()) };
+    };
+
+    static constexpr auto GuidePairs = [] [[nodiscard]] (const EvaluateNr& e) noexcept -> std::array<Pair, 10> {
+        return { UInt(NrParameter::DepthSubrectBaseX, 0u),
+                 UInt(NrParameter::DepthSubrectBaseY, 0u),
+                 UInt(NrParameter::DepthSubrectWidth, e.guide.width.Get()),
+                 UInt(NrParameter::DepthSubrectHeight, e.guide.height.Get()),
+                 UInt(NrParameter::MVecSubrectBaseX, 0u),
+                 UInt(NrParameter::MVecSubrectBaseY, 0u),
+                 UInt(NrParameter::MVecSubrectWidth, e.guide.width.Get()),
+                 UInt(NrParameter::MVecSubrectHeight, e.guide.height.Get()),
+                 Float(NrParameter::MVecScaleX, e.mvScaleX.Get()),
+                 Float(NrParameter::MVecScaleY, e.mvScaleY.Get()) };
+    };
     return PushAll(NrParameterList{}, ResourcePairs(evaluate))
         .and_then([&evaluate](const NrParameterList& list) { return PushAll(list, ColorSubrectPairs(evaluate)); })
         .and_then([&evaluate](const NrParameterList& list) { return PushAll(list, GuidePairs(evaluate)); })

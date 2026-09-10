@@ -23,21 +23,15 @@ void Record(const void* function, bool enter) noexcept
     g_sequence = g_sequence + 1;
 }
 
-[[nodiscard]] const char* Direction(bool enter) noexcept
-{
-    return enter ? "enter" : "exit ";
-}
-
-void PrintEntry(std::FILE* sink, const TraceEntry& entry) noexcept
-{
-    if (entry.function != nullptr)
-        std::fprintf(sink, "%llu %s %p\n", static_cast<unsigned long long>(entry.sequence), Direction(entry.enter), entry.function);
-}
-
 } // namespace
 
 void DumpTrace() noexcept
 {
+    static constexpr auto PrintEntry = [](std::FILE* sink, const TraceEntry& entry) noexcept -> void {
+        static constexpr auto Direction = [] [[nodiscard]] (bool enter) noexcept -> const char* { return enter ? "enter" : "exit "; };
+        if (entry.function != nullptr)
+            std::fprintf(sink, "%llu %s %p\n", static_cast<unsigned long long>(entry.sequence), Direction(entry.enter), entry.function);
+    };
     std::FILE* sink = std::fopen("dlssscreen-trace.txt", "w");
     if (sink == nullptr)
         return;

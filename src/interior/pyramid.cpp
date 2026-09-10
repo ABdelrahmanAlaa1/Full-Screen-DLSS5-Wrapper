@@ -17,13 +17,6 @@ using infra::Fail;
     return std::max(value, std::uint32_t{ 1 });
 }
 
-[[nodiscard]] PixelCount HalvedCount(PixelCount count) noexcept
-{
-    const Result<PixelCount, UnitError> halved = PixelCountTag::Parse(AtLeastOne(count.Get() >> 1));
-    ENSURE(halved.has_value());
-    return *halved;
-}
-
 [[nodiscard]] bool IsAtLeastMinimum(std::uint32_t value, std::uint32_t level) noexcept
 {
     return (value >> level) >= kMinLevelSize;
@@ -41,25 +34,15 @@ using infra::Fail;
     return PyramidError::Unit;
 }
 
-[[nodiscard]] Result<GroupCount, PyramidError> GroupsAlong(PixelCount count) noexcept
-{
-    return CeilDiv(count.Get(), kGroupSize).and_then([](std::uint32_t groups) { return GroupCountTag::Parse(groups).transform_error(FromUnit); });
-}
-
-[[nodiscard]] Result<PixelCount, PyramidError> CellsAlong(PixelCount count, std::uint32_t grid) noexcept
-{
-    return CeilDiv(count.Get(), grid).and_then([](std::uint32_t cells) { return PixelCountTag::Parse(cells).transform_error(FromUnit); });
-}
-
-[[nodiscard]] Result<LevelExtents, PyramidError> AppendHalved(const LevelExtents& acc, std::uint32_t) noexcept
-{
-    return acc.Push(Halved(acc.Last())).transform_error([](infra::CapacityExceeded) { return PyramidError::Capacity; });
-}
-
 } // namespace
 
 Extent Halved(const Extent& extent) noexcept
 {
+    static constexpr auto HalvedCount = [] [[nodiscard]] (PixelCount count) noexcept -> PixelCount {
+        const Result<PixelCount, UnitError> halved = PixelCountTag::Parse(AtLeastOne(count.Get() >> 1));
+        ENSURE(halved.has_value());
+        return *halved;
+    };
     return Extent{ HalvedCount(extent.width), HalvedCount(extent.height) };
 }
 
@@ -78,6 +61,9 @@ LevelCount LevelCountFor(const Extent& source) noexcept
 
 Result<LevelExtents, PyramidError> LevelExtentsOf(const Extent& source, LevelCount levels) noexcept
 {
+    static constexpr auto AppendHalved = [] [[nodiscard]] (const LevelExtents& acc, std::uint32_t) noexcept -> Result<LevelExtents, PyramidError> {
+        return acc.Push(Halved(acc.Last())).transform_error([](infra::CapacityExceeded) { return PyramidError::Capacity; });
+    };
     return LevelExtents{}.Push(source).transform_error([](infra::CapacityExceeded) { return PyramidError::Capacity; }).and_then([levels](const LevelExtents& first) {
         return infra::FoldResult(std::views::iota(std::uint32_t{ 1 }, levels.Get()), Result<LevelExtents, PyramidError>(first), AppendHalved);
     });
@@ -85,11 +71,17 @@ Result<LevelExtents, PyramidError> LevelExtentsOf(const Extent& source, LevelCou
 
 Result<ThreadGroups, PyramidError> GroupsFor(const Extent& extent) noexcept
 {
+    static constexpr auto GroupsAlong = [] [[nodiscard]] (PixelCount count) noexcept -> Result<GroupCount, PyramidError> {
+        return CeilDiv(count.Get(), kGroupSize).and_then([](std::uint32_t groups) { return GroupCountTag::Parse(groups).transform_error(FromUnit); });
+    };
     return GroupsAlong(extent.width).and_then([&extent](GroupCount x) { return GroupsAlong(extent.height).transform([x](GroupCount y) { return ThreadGroups{ x, y }; }); });
 }
 
 Result<Extent, PyramidError> GridExtent(const Extent& source, std::uint32_t grid) noexcept
 {
+    static constexpr auto CellsAlong = [] [[nodiscard]] (PixelCount count, std::uint32_t grid) noexcept -> Result<PixelCount, PyramidError> {
+        return CeilDiv(count.Get(), grid).and_then([](std::uint32_t cells) { return PixelCountTag::Parse(cells).transform_error(FromUnit); });
+    };
     return CellsAlong(source.width, grid).and_then([&source, grid](PixelCount width) {
         return CellsAlong(source.height, grid).transform([width](PixelCount height) { return Extent{ width, height }; });
     });
