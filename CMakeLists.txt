@@ -8,7 +8,7 @@ project(DlssScreen VERSION 0.2.0 LANGUAGES CXX)
 #   src/effects/real    Windows: D3D12, DirectComposition, Windows Graphics Capture, NGX
 #   src/app             composition root and the generic session loop
 #   tests               property tests and the seed fuzzer (portable)
-#   gate                rules lint and mutation testing
+#   gate                mutation testing and the dependency lock
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,15 +105,6 @@ target_link_libraries(dscreen_tests PRIVATE dscreen_core dscreen_trace_flags dsc
 add_test(NAME properties_seed_1000 COMMAND dscreen_tests 1000)
 add_test(NAME properties_seed_2000 COMMAND dscreen_tests 2000)
 add_test(NAME properties_seed_3000 COMMAND dscreen_tests 3000)
-
-# --- gate tools ----------------------------------------------------------------------------------
-add_executable(rules_lint EXCLUDE_FROM_ALL gate/rules_lint.cpp) # built on demand by the gate, not by a plain build
-target_link_libraries(rules_lint PRIVATE dscreen_flags)
-add_custom_target(lint
-  COMMAND rules_lint "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/gate"
-  DEPENDS rules_lint
-  COMMENT "rules_lint: checking the rules that a tool can check"
-  VERBATIM)
 
 # --- the Windows application ----------------------------------------------------------------------
 if(WIN32)

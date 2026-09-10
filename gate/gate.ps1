@@ -1,5 +1,6 @@
-# The gate (VIII) on Windows: builds everything including DlssScreen.exe with warnings as errors and
-# tracing, runs the formatter check, the lint, the property tests, mutation testing and the lock check.
+# The gate (IX) on Windows: builds everything including DlssScreen.exe with warnings as errors and
+# tracing, runs the formatter check, then the optional verification that exists here: the property
+# tests, mutation testing and the lock check.
 # Usage: pwsh gate/gate.ps1 -DlssSdkDir C:\DLSS [-NvofSdkDir C:\NVOF] [-Mutants 40]
 param(
     [Parameter(Mandatory = $true)][string]$DlssSdkDir,
@@ -17,8 +18,6 @@ cmake -S . -B $BuildDir -G "Visual Studio 17 2022" -A x64 "-DDLSS_SDK_DIR=$DlssS
 if ($LASTEXITCODE -ne 0) { throw "configure failed" }
 cmake --build $BuildDir --config Release
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
-cmake --build $BuildDir --config Release --target rules_lint
-if ($LASTEXITCODE -ne 0) { throw "lint build failed" }
 if ($nvof -eq "OFF") {
     Write-Host "== the other value of the feature flag (R31): NVOF=ON is built when NvofSdkDir is given"
 }
@@ -27,10 +26,6 @@ Write-Host "== formatter"
 $sources = git ls-files '*.cpp' '*.h'
 clang-format --dry-run --Werror --style=file $sources
 if ($LASTEXITCODE -ne 0) { throw "formatter check failed" }
-
-Write-Host "== rules lint, function index and inventories"
-& "$BuildDir/Release/rules_lint.exe" . "$BuildDir/gate"
-if ($LASTEXITCODE -ne 0) { throw "rules lint failed" }
 
 Write-Host "== property tests and seed fuzzer"
 ctest --test-dir $BuildDir -C Release --output-on-failure

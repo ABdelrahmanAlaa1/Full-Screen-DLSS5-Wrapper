@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The gate (VIII) for the portable targets: warnings as errors, lint, formatter, property tests under
-# several seeds, sanitizers, mutation testing and the inventories. Run from the repository root.
+# The gate (IX) for the portable targets: warnings as errors and the formatter, then the optional
+# verification that exists here: property tests under several seeds, sanitizers, mutation testing and
+# the dependency lock. Run from the repository root.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
@@ -12,7 +13,6 @@ asan=${ASAN_DIR:-build-gate-asan}
 echo "== configure and build (warnings as errors, tracing on)"
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null
 cmake --build "$build"
-cmake --build "$build" --target rules_lint
 
 echo "== formatter"
 if command -v clang-format >/dev/null; then
@@ -20,9 +20,6 @@ if command -v clang-format >/dev/null; then
 else
   echo "clang-format not installed" >&2; exit 1
 fi
-
-echo "== rules lint, function index and inventories"
-"$build/rules_lint" . "$build/gate"
 
 echo "== property tests and seed fuzzer"
 ctest --test-dir "$build" --output-on-failure

@@ -16,9 +16,9 @@ third-party overlay on principle, whatever it is doing. Check the rules of anyth
 alongside; the design avoids the techniques anti-cheat is built to catch, but it cannot make the tool
 invisible, and nothing here should be read as a guarantee against a ban.
 
-This branch is a from-scratch rewrite under the *Rules for AI-Written Code* (see `COMPLIANCE.md`):
-a pure planning core, a seeded simulator of the effect layer, property tests with mutation testing,
-build-applied call tracing, contracts that run in production, and a lint that enforces the rules.
+This is a from-scratch rewrite under the *Rules for AI-Written Code* (`AI_CODE_RULES.md`; `COMPLIANCE.md`
+maps each rule to the code): a pure planning core, a seeded simulator of the effect layer, property tests
+with mutation testing, build-applied call tracing, and contracts that run in production.
 
 ## This is not what DLSS 5 looks like in a game
 
@@ -223,12 +223,12 @@ flat plane changes little. None of these carries a range, so DlssScreen imposes 
 | `src/effects/real` | Windows: D3D12, DirectComposition, Windows Graphics Capture, NGX, optical flow |
 | `src/app` | the generic session loop and the composition root |
 | `tests` | property tests and the seed fuzzer |
-| `gate` | the rules lint, mutation testing, dependency lock, gate scripts |
+| `gate` | mutation testing, dependency lock, gate scripts |
 | `shaders` | HLSL compute and blit kernels compiled by DXC at build time |
 
 ## The gate
 
 `gate/gate.sh` (Linux, portable targets) and `gate/gate.ps1` (Windows, everything) run: the build with
-warnings as errors and tracing, the formatter check, the rules lint with its function index and
-inventories, the property tests under several seeds, the sanitizers, mutation testing, and the
-dependency-lock check. `COMPLIANCE.md` maps every rule to its enforcement.
+warnings as errors and tracing, the formatter check, the property tests under several seeds, the
+sanitizers, mutation testing, and the dependency-lock check. `COMPLIANCE.md` maps every rule to its
+enforcement.
