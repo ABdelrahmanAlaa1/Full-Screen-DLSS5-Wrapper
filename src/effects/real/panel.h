@@ -75,6 +75,7 @@ struct PanelFindings
 {
     PanelLists lists;
     bool superResolution;                          // whether the driver offers it at all; without it the choice is shown but greyed
+    bool opticalFlow;                              // whether this build carries the NVIDIA Optical Flow backend; without it that choice is shown but greyed
     std::optional<interior::MonitorHandle> window; // the window this session is working on, when it is working on one
 };
 
@@ -109,6 +110,7 @@ struct ControlPanel
     bool displayAffinity;
     bool clickThrough;
     bool superResolution;
+    bool opticalFlow;
     bool showInert;  // whether the Inert page has a tab, which is what decides how tall the panel is
     HWND notice;     // the one line that is always there
     HWND expander;   // holds its own state, which is the panel's record of whether the notice is open

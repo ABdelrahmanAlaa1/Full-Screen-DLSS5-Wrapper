@@ -138,8 +138,8 @@ constexpr std::array<GroupSpec, kGroupCount> kGroups{ {
     { L"Style", L"Which of the model's three looks to ask for. The model clamps anything else.", 3, { L"Standard", L"Natural", L"Cinematic" } },
     { L"Cursor", L"Whether the captured picture includes the mouse pointer. Auto keeps the session's own choice.", 3, { L"Auto", L"On", L"Off" } },
     { L"Motion vectors", L"Where the model's motion comes from: matching blocks between frames, the hardware flow engine, or nothing at all.", 3, { L"Block matching", L"Optical flow", L"None" } },
-    { L"Optical flow grid", L"How coarse the hardware flow engine's output is. This build leaves that engine out, so it does nothing.", 3, { L"1", L"2", L"4" } },
-    { L"Optical flow effort", L"How hard the hardware flow engine works. This build leaves that engine out, so it does nothing.", 3, { L"Slow", L"Medium", L"Fast" } },
+    { L"Optical flow grid", L"How coarse the hardware flow engine's output is.", 3, { L"1", L"2", L"4" } },
+    { L"Optical flow effort", L"How hard the hardware flow engine works.", 3, { L"Slow", L"Medium", L"Fast" } },
     { L"Super resolution", L"Whether DLSS Super Resolution runs before the model, and whether it runs at all when the sizes match.", 3, { L"Auto", L"DLAA", L"Off" } },
     { L"Colour format", L"How much precision the model's picture carries.", 2, { L"8 bit", L"16 bit float", nullptr } },
     { L"Log level", L"How much the log says.", 4, { L"Debug", L"Info", L"Warn", L"Error" } },
@@ -1110,6 +1110,11 @@ struct Notice
 }
 
 constexpr wchar_t kNoSuperResolution[] = L"Not offered: the driver reports no DLSS Super Resolution, whose model NVIDIA ships separately. The rest of the session runs without it.";
+constexpr wchar_t kNoOpticalFlow[] = L"Where the model's motion comes from: matching blocks between frames, or nothing at all. Optical flow is not offered: this build has no NVIDIA "
+                                     L"Optical Flow backend (configure with -DDSCREEN_ENABLE_NVOF=ON).";
+constexpr wchar_t kNoOpticalFlowEngine[] = L"Not offered: this build has no NVIDIA Optical Flow backend, so this changes nothing.";
+// The Motion group lists its choices in the order of the MotionBackend enumeration, which is how the panel reads them back.
+constexpr std::size_t kOpticalFlowChoice = static_cast<std::size_t>(interior::MotionBackend::NvOpticalFlow);
 
 } // namespace
 
@@ -1561,6 +1566,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  o.displayAffinity,
                                  o.clickThrough,
                                  findings.superResolution,
+                                 findings.opticalFlow,
                                  o.showInert,
                                  notice.line,
                                  notice.expander,
@@ -1645,11 +1651,19 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         AddHint(panel.tooltip, parent, panel.groupLabels[static_cast<std::size_t>(Group::Sr)], kNoSuperResolution);
                         AddHint(panel.tooltip, parent, panel.labels[static_cast<std::size_t>(Field::SrPreset)], kNoSuperResolution);
                     };
+                    static constexpr auto HintMissingOpticalFlow = [](const ControlPanel& panel, HWND parent) noexcept -> void {
+                        if (panel.opticalFlow)
+                            return;
+                        AddHint(panel.tooltip, parent, panel.groupLabels[static_cast<std::size_t>(Group::Motion)], kNoOpticalFlow);
+                        AddHint(panel.tooltip, parent, panel.groupLabels[static_cast<std::size_t>(Group::NvofGrid)], kNoOpticalFlowEngine);
+                        AddHint(panel.tooltip, parent, panel.groupLabels[static_cast<std::size_t>(Group::NvofPerf)], kNoOpticalFlowEngine);
+                    };
                     HWND parent = panel.window.get();
                     HintNumbers(panel, parent);
                     HintChoices(panel, parent);
                     HintResets(panel, parent);
                     HintMissingSuperResolution(panel, parent);
+                    HintMissingOpticalFlow(panel, parent);
                 };
 
                 static constexpr auto IconiseResets = [](const ControlPanel& panel) noexcept -> void {
@@ -1777,8 +1791,14 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
             };
             EnableAll(ControlsOfField(panel, static_cast<std::size_t>(Field::Split)), ShowsASplit(panel));
             EnableAll(ControlsOfField(panel, static_cast<std::size_t>(Field::Skin)), !IsOn(panel, Toggle::SkinFollowsStructure));
+            static constexpr auto OpticalFlowChoice = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::span<const HWND> {
+                return ChoicesOf(panel, Group::Motion).subspan(kOpticalFlowChoice, 1);
+            };
             EnableAll(ChoicesOf(panel, Group::Sr), panel.superResolution);
             EnableAll(ControlsOfField(panel, static_cast<std::size_t>(Field::SrPreset)), panel.superResolution);
+            EnableAll(OpticalFlowChoice(panel), panel.opticalFlow);
+            EnableAll(ChoicesOf(panel, Group::NvofGrid), panel.opticalFlow);
+            EnableAll(ChoicesOf(panel, Group::NvofPerf), panel.opticalFlow);
         };
 
         // What the panel does to itself before it is read: the chosen page, the notice, what is greyed, and any

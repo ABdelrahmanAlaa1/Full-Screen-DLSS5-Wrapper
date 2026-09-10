@@ -577,7 +577,10 @@ struct Ended
                     return 0;
                 return real::NeuralRenderingPresetCount(*d.runtime).value_or(0);
             };
-            return real::PanelFindings{ ListsFor(b, real::UsableAdapters(d.device.factory.Get()), OfferedPresets(d)), OffersSuperResolution(d), FollowedWindow(b) };
+            return real::PanelFindings{ .lists = ListsFor(b, real::UsableAdapters(d.device.factory.Get()), OfferedPresets(d)),
+                                        .superResolution = OffersSuperResolution(d),
+                                        .opticalFlow = kHasOpticalFlow,
+                                        .window = FollowedWindow(b) };
         };
 
         static constexpr auto HeldPanel = [] [[nodiscard]] (const Base& b, const SessionPlan& plan, const real::PanelFindings& findings,
