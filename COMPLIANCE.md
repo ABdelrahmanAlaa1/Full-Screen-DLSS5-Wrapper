@@ -23,6 +23,14 @@ bounded list of steps (`Transition`, `Dispatch`, `CopyBuffer`, `ClearTarget`, `E
 environment; `real::RealEnvironment` records the steps into Direct3D 12 command lists and
 `sim::SimEnvironment` checks them against a resource-state model. The same loop runs both.
 
+## Scope
+
+Under amendment A2 the rules bind shipped product code: `src/infrastructure`, `src/interior`,
+`src/effects/real` and `src/app`. `tests` and the simulator in `src/effects/sim` (a test double that only
+`tests/simulation_test.cpp` uses; the executable never links it) are exempt, as are the gate scripts, and
+are written the ordinary way. What still binds them is listed in A2: dependency provenance, no fabricated
+pass, independent expected results, no invented contracts, and no silent no-op double.
+
 ## Rule by rule
 
 | Rule | How the code meets it | Enforced by |
@@ -59,6 +67,7 @@ environment; `real::RealEnvironment` records the steps into Direct3D 12 command 
 | R30 Consult the index before writing | Ordinary repository search by name and type before a function is written. | Workflow constraint |
 | R31 Metaprogramming is confined to infrastructure | Templates and macros live in `src/infrastructure` (results, strong types, bounded containers, folds, formatting, contracts, tracing). The waivered exceptions are the effect interfaces (`com.h`, `session.h`), the composition root and the generic option-table lookups. Shader byte code is a build artefact produced by DXC from the checked-in HLSL, like an object file. `DSCREEN_HAVE_NVOF` is the only feature flag; the gate builds both values. | Source constraint |
 | R32 A change does what it says | Commits on this branch each state one change. | Review |
+| A1 Dependency provenance | The only non-standard code is NVIDIA's (the DLSS SDK, the optical flow SDK) and the platform's own (Direct3D, DirectComposition, Windows Graphics Capture, WinTrust); there is no package manager and no other package. | `gate/dependencies.lock`, `gate/check_lock.py` |
 
 ## Interpretations
 

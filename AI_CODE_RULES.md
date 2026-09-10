@@ -394,3 +394,37 @@ Do not disable required compiler checks, relax a configured lint rule, or suppre
 If compilation or the provided tools cannot be run, report which were not run and why. If they pass, report what passed — not universal correctness, crash-safety proof, complete replayability, or verification that was never performed. Passing the configured rules establishes only the properties those rules check.
 
 Advanced checks are selected independently from VERIFICATION_PROFILES.md. Their absence is not an instruction to build them.
+---
+
+## Project amendments
+
+These amend the rules above for this project and take precedence where they conflict.
+
+**A1. Dependency provenance (amends R29).** Use the standard library, including the platform's standard framework libraries — for C#, the built-in .NET libraries, not only the base language. A non-standard library is justified only when the standard library lacks the capability, the platform's own documentation directs you to the package, or the alternative is hand-rolling something R29 forbids.
+
+Where a library is justified, prefer first-party publishers: the vendor of the platform being targeted, and the vendor of any external service being called. A Windows tool may use Microsoft-published libraries by default; a Windows tool calling a Google API may use Microsoft- and Google-published libraries by default.
+
+All other third-party libraries and packages require explicit user approval before use. When proposing one, rank candidates by trust: first, packages published by Microsoft, Google, Intel, Nvidia, or Apple (see https://github.com/ThioJoe/Big-Tech-Verified-Open-Source); then a community project that is the reference implementation of its specification or the package the platform's own documentation points to — *the* solution, not *a* popular one.
+
+Publisher identity comes from the package registry's verified owner, never from the package name. Publisher reputation is not maintenance status: confirm the package is actively maintained and version-matched to the target platform. A first-party package that is archived or deprecated is not preferred over a maintained alternative.
+
+This policy applies to the resolved dependency graph, not the direct dependency alone. A proposal names the transitive packages the addition brings in and their publishers.
+
+If approval is unavailable, stop and report the blocker (R36). Hand-rolling parsing, escaping, quoting, cryptography, or time handling is never the fallback, and neither is vendoring third-party source to avoid the approval.
+
+An approval is recorded where the dependency is declared: the package, the version, who approved it, and when. Dependencies already present in the project are not re-litigated during an unrelated task (R32).
+*Check:* Ordinary build dependency resolution and the existing lockfile. Provenance and approval are source/workflow constraints.
+
+**A2. Scope of these rules (amends all rules above).** The rules in this document apply to shipped product code. They do not apply to tests, test fixtures and doubles, benchmarks, or internal tooling, with the exceptions below. Exempt code needs no waivers; the exemption is not a deviation.
+
+Internal tooling means code that does not ship and that nothing the user runs depends on at runtime: build scripts, developer utilities, one-off analysis scripts, and the linter and gate configuration itself. Code that produces a shipped artifact, modifies product source, or reads or writes real user data is product code no matter where it lives. A test helper that product code calls is product code.
+
+These rules apply in exempt code as written:
+
+- A1, dependency provenance. A package added for tests or tooling is still a package in the project.
+- R19, nothing unfinished reports success. A test that fabricates a pass, asserts nothing, or skips without reporting the skip is a defect. An unfinished tool fails visibly rather than producing plausible output.
+- R26's independence requirement. Expected results are not derived from the implementation under test.
+- R36, do not invent contracts. A test does not assert a guessed external behavior as though it were specified.
+- R33's prohibition on silent no-op implementations, for any double that implements a product interface. A double that quietly does nothing verifies nothing.
+
+Everything else — one operation per function, single assignment, no loops, no recursion, domain types in signatures, effects in types, comment limits, and the rest — is not required in exempt code. Write it the ordinary way.
