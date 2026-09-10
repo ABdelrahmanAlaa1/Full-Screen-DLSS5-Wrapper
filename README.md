@@ -57,16 +57,19 @@ than leaving the overlay sitting over where it used to be. The crosshair goes ba
 the next session takes the monitor the Source setting names, which is the primary one unless it says
 otherwise. Restoring the window does not take it back: drag the crosshair onto it again.
 
-## The model file
+## The model files
 
-`nvngx_dlssnr.dll` is NVIDIA's, is not in this repository, and is not in the build artifact. Put it next to
-`FullScreenWrapperForDLSS5.exe` or point `--ngx-path` at the folder that holds it.
+`nvngx_dlssnr.dll` (neural rendering, feature 18) is NVIDIA's, is not in this repository, and is not in the
+build artifact. Put it next to `FullScreenWrapperForDLSS5.exe` or point `--ngx-path` at the folder that
+holds it. `nvngx_dlss.dll` (super resolution, feature 1) is NVIDIA's too, and is optional: without it the
+session runs without super resolution, and the panel says so beside a warning glyph.
 
-Because the NGX loader picks that file up by name from a folder anyone can write to, this tool checks it
-before the loader gets there: Windows must accept its Authenticode signature, and the signing certificate
-must name NVIDIA. A file that fails stops the session. The file is then held open, shared for reading only,
+Because the NGX loader picks these files up by name from a folder anyone can write to, this tool checks
+whichever of them it finds in one of those folders before the loader gets there: Windows must accept its Authenticode signature, and the signing certificate
+must name NVIDIA. A file that fails stops the session. Each is then held open, shared for reading only,
 for as long as the session runs, so it cannot be written to, deleted or renamed afterwards — the file that
-was checked is the file that loads. This does not defend against a machine that was already compromised
+was checked is the file that loads. A model that is not in one of those folders is not checked: super
+resolution may still run from the driver's own copy, which lives where Windows, not this tool, guards it. This does not defend against a machine that was already compromised
 before the check, and it says nothing about a model loaded from anywhere else.
 
 ## Requirements
@@ -81,6 +84,9 @@ before the check, and it says nothing about a model loaded from anywhere else.
   `--ngx-path`. NGX looks for feature DLLs in the application folder and the listed paths, the way
   games ship `nvngx_dlss.dll`; the driver does not install this one and this tool does not ship it.
   Without it the loader reports `DLSSNR.Available = 0` and this tool stops with a message saying so.
+- Optional, for super resolution: `nvngx_dlss.dll`, in the same two folders. Games carry a copy and the
+  DLSS SDK ships one; recent drivers keep one of their own, which is what a session uses when neither
+  folder has one. Without any of them the panel greys the super resolution choice and says why.
 - Visual Studio 2022 17.8+ (MSVC 19.38), CMake 3.21+, Ninja or MSBuild, the Windows 10 SDK (dxc.exe).
 - Optional: the NVIDIA Optical Flow SDK for the hardware motion-vector backend (`-DDSCREEN_ENABLE_NVOF=ON`).
 

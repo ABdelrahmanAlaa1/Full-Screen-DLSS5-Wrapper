@@ -98,6 +98,7 @@ struct ControlPanel
     std::array<HWND, kToggleCount> toggles;
     std::array<HWND, kToggleCount> toggleResets;
     std::array<HWND, kGroupCount> groupLabels;
+    std::array<HWND, kGroupCount> groupWarnings; // a glyph before a group's label when what it warns of is true, or nothing
     std::array<std::array<HWND, kMaxChoices>, kGroupCount> choices;
     std::array<HWND, kPickCount> pickLabels;
     std::array<HWND, kPickCount> crosshairs; // each holds the window it was last dragged onto

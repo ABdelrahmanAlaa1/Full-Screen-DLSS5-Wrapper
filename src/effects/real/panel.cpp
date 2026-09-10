@@ -147,18 +147,29 @@ struct GroupSpec
     const wchar_t* hint;
     std::size_t count;
     std::array<const wchar_t*, kMaxChoices> choices;
+    const wchar_t* warning; // what a glyph before the label warns of, when the session says it applies, or nothing
 };
 
+// What super resolution wants and this machine may not have. The glyph and the hint appear together.
+constexpr wchar_t kNoSuperResolution[] = L"Not offered.\n"
+                                         L"DLSS Super Resolution runs from nvngx_dlss.dll, which NVIDIA ships separately: games carry a copy, the DLSS SDK has one, and recent drivers keep one "
+                                         L"of their own. Put it next to the executable or in the folder --ngx-path names.\n"
+                                         L"The rest of the session runs without it.";
+
 constexpr std::array<GroupSpec, kGroupCount> kGroups{ {
-    { L"Compare", L"What the window shows: the model's work, the picture as captured, or both either side of a divider.", 3, { L"Processed", L"Original", L"Split" } },
-    { L"Style", L"Which of the model's three looks to ask for. The model clamps anything else.", 3, { L"Standard", L"Natural", L"Cinematic" } },
-    { L"Cursor", L"Whether the captured picture includes the mouse pointer. Auto keeps the session's own choice.", 3, { L"Auto", L"On", L"Off" } },
-    { L"Motion vectors", L"Where the model's motion comes from: matching blocks between frames, the hardware flow engine, or nothing at all.", 3, { L"Block matching", L"Optical flow", L"None" } },
-    { L"Optical flow grid", L"How coarse the hardware flow engine's output is.", 3, { L"1", L"2", L"4" } },
-    { L"Optical flow effort", L"How hard the hardware flow engine works.", 3, { L"Slow", L"Medium", L"Fast" } },
-    { L"Super resolution", L"Whether DLSS Super Resolution runs before the model, and whether it runs at all when the sizes match.", 3, { L"Auto", L"DLAA", L"Off" } },
-    { L"Colour format", L"How much precision the model's picture carries.", 2, { L"8 bit", L"16 bit float", nullptr } },
-    { L"Log level", L"How much the log says.", 4, { L"Debug", L"Info", L"Warn", L"Error" } },
+    { L"Compare", L"What the window shows: the model's work, the picture as captured, or both either side of a divider.", 3, { L"Processed", L"Original", L"Split" }, nullptr },
+    { L"Style", L"Which of the model's three looks to ask for. The model clamps anything else.", 3, { L"Standard", L"Natural", L"Cinematic" }, nullptr },
+    { L"Cursor", L"Whether the captured picture includes the mouse pointer. Auto keeps the session's own choice.", 3, { L"Auto", L"On", L"Off" }, nullptr },
+    { L"Motion vectors",
+      L"Where the model's motion comes from: matching blocks between frames, the hardware flow engine, or nothing at all.",
+      3,
+      { L"Block matching", L"Optical flow", L"None" },
+      nullptr },
+    { L"Optical flow grid", L"How coarse the hardware flow engine's output is.", 3, { L"1", L"2", L"4" }, nullptr },
+    { L"Optical flow effort", L"How hard the hardware flow engine works.", 3, { L"Slow", L"Medium", L"Fast" }, nullptr },
+    { L"Super resolution", L"Whether DLSS Super Resolution runs before the model, and whether it runs at all when the sizes match.", 3, { L"Auto", L"DLAA", L"Off" }, kNoSuperResolution },
+    { L"Colour format", L"How much precision the model's picture carries.", 2, { L"8 bit", L"16 bit float", nullptr }, nullptr },
+    { L"Log level", L"How much the log says.", 4, { L"Debug", L"Info", L"Warn", L"Error" }, nullptr },
 } };
 
 struct ListSpec
@@ -649,6 +660,7 @@ struct Built
     std::array<HWND, kToggleCount> toggles;
     std::array<HWND, kToggleCount> toggleResets;
     std::array<HWND, kGroupCount> groupLabels;
+    std::array<HWND, kGroupCount> groupWarnings;
     std::array<std::array<HWND, kMaxChoices>, kGroupCount> choices;
     std::array<HWND, kPickCount> pickLabels;
     std::array<HWND, kPickCount> crosshairs;
@@ -906,7 +918,11 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
                     };
 
                     static constexpr auto ShowGroup = [](const ControlPanel& panel, std::size_t group, int how) noexcept -> void {
+                        // The only group that carries a warning is super resolution, and what it warns of is the model being
+                        // absent, which the session settled before the panel was built.
+                        static constexpr auto WarningHow = [] [[nodiscard]] (const ControlPanel& panel, int how) noexcept -> int { return HowOf(how == SW_SHOW && !panel.superResolution); };
                         (void)::ShowWindow(panel.groupLabels[group], how);
+                        (void)::ShowWindow(panel.groupWarnings[group], WarningHow(panel, how));
                         ShowAll(ChoicesOf(panel, static_cast<Group>(group)), how);
                     };
                     if (row.kind == Kind::Group)
@@ -1133,7 +1149,6 @@ struct Notice
     return std::ranges::all_of(std::views::iota(std::size_t{ 0 }, kToggleCount), [&panel](std::size_t t) { return ResetAsSpecified(panel, t); });
 }
 
-constexpr wchar_t kNoSuperResolution[] = L"Not offered: the driver reports no DLSS Super Resolution, whose model NVIDIA ships separately. The rest of the session runs without it.";
 constexpr wchar_t kNoOpticalFlow[] = L"Where the model's motion comes from: matching blocks between frames, or nothing at all. Optical flow is not offered: this build has no NVIDIA "
                                      L"Optical Flow backend (configure with -DDSCREEN_ENABLE_NVOF=ON).";
 constexpr wchar_t kNoOpticalFlowEngine[] = L"Not offered: this build has no NVIDIA Optical Flow backend, so this changes nothing.";
@@ -1472,8 +1487,20 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                             return choice;
                         });
                     };
-                    built.groupLabels = infra::Generated<HWND, kGroupCount>(
-                        [&](std::size_t g) { return CreateLabel(parent, m, kGroups[g].label, PlaceOfRow(Kind::Group, g, m).left, PlaceOfRow(Kind::Group, g, m).top, kColumnWidth); });
+                    // A group with a warning wears the glyph in front of its label, and the label starts after it.
+                    static constexpr auto GroupInset = [] [[nodiscard]] (std::size_t g) noexcept -> int { return kGroups[g].warning == nullptr ? 0 : kWarningWidth; };
+
+                    static constexpr auto CreateGroupWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t g) noexcept -> HWND {
+                        if (kGroups[g].warning == nullptr)
+                            return nullptr;
+                        const Placement at = PlaceOfRow(Kind::Group, g, m);
+                        return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_CENTERIMAGE | SS_NOTIFY, 0, Bounds(m, at.left, at.top, kWarningWidth - 4, m.LabelHeight()));
+                    };
+                    built.groupLabels = infra::Generated<HWND, kGroupCount>([&](std::size_t g) {
+                        const Placement at = PlaceOfRow(Kind::Group, g, m);
+                        return CreateLabel(parent, m, kGroups[g].label, at.left + GroupInset(g), at.top, kColumnWidth - GroupInset(g));
+                    });
+                    built.groupWarnings = infra::Generated<HWND, kGroupCount>([&](std::size_t g) { return CreateGroupWarning(parent, m, g); });
                     built.choices = infra::Generated<std::array<HWND, kMaxChoices>, kGroupCount>([&](std::size_t g) { return CreateChoices(parent, m, g, chosen[g]); });
                     return built;
                 };
@@ -1617,6 +1644,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.toggles,
                                  built.toggleResets,
                                  built.groupLabels,
+                                 built.groupWarnings,
                                  built.choices,
                                  built.pickLabels,
                                  built.crosshairs,
@@ -1716,6 +1744,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         if (panel.superResolution)
                             return;
                         AddHint(panel.tooltip, parent, panel.groupLabels[static_cast<std::size_t>(Group::Sr)], kNoSuperResolution);
+                        AddHint(panel.tooltip, parent, panel.groupWarnings[static_cast<std::size_t>(Group::Sr)], kNoSuperResolution);
                         AddHint(panel.tooltip, parent, panel.labels[static_cast<std::size_t>(Field::SrPreset)], kNoSuperResolution);
                     };
                     static constexpr auto HintMissingOpticalFlow = [](const ControlPanel& panel, HWND parent) noexcept -> void {
@@ -1744,6 +1773,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     std::ranges::for_each(panel.toggleResets, [&panel](HWND button) { WearIcon(panel, button); });
                     std::ranges::for_each(panel.pickResets, [&panel](HWND button) { WearIcon(panel, button); });
                     std::ranges::for_each(panel.warnings, [&panel](HWND glyph) { WearIcon(panel, glyph); });
+                    std::ranges::for_each(panel.groupWarnings, [&panel](HWND glyph) { WearIcon(panel, glyph); });
                     WearIcon(panel, panel.expander);
                     (void)::SendMessageW(panel.notice, WM_SETFONT, reinterpret_cast<WPARAM>(panel.boldFont.get()), TRUE);
                 };
