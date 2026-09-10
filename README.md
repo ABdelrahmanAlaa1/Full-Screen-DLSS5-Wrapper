@@ -168,6 +168,11 @@ way. Motion vectors are not on that page: they are real, computed by matching bl
 `--mv-scale-x`, `--mv-scale-y`, `--mv-level` and `--reset-threshold` all do something — just nothing
 visible while the picture holds still.
 
+**Model passes** (`--nr-passes`, on the Model page with a warning glyph beside it) runs the model on its
+own output: pass two takes the picture pass one made, and so on, each pass a model instance with a history
+of its own, and only the last is shown. It exists to see what the model makes of its own work, not for
+use: every pass costs the whole model again and holds the picture back by as much.
+
 ```
 DlssScreen.exe                       # neural rendering on the primary monitor
 DlssScreen.exe --monitor 1 --target 0  # capture monitor 1, upscale with DLSS and present on monitor 0

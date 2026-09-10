@@ -28,6 +28,7 @@ struct LiveSettings
 {
     bool neuralRendering;
     NrTuning tuning;
+    PassCount passes; // how many times a frame the model runs on its own output
     bool depthInverted;
     MotionScale mvScaleX;
     MotionScale mvScaleY;
@@ -66,6 +67,7 @@ struct Options
     std::optional<RequestedMonitor> target;
     bool neuralRendering;
     NrTuning tuning;
+    PassCount nrPasses; // how many times a frame the model runs on its own output
     SrMode sr;
     SrPreset srPreset;
     MotionBackend motion;

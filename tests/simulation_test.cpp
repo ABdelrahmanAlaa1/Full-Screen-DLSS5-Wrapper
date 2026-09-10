@@ -28,6 +28,7 @@ using namespace interior;
                         std::nullopt,
                         proptest::DrawBool(rng),
                         d.tuning,
+                        d.nrPasses,
                         backends[proptest::DrawBelow(rng, 3)],
                         levels,
                         d.motionFinestLevel,

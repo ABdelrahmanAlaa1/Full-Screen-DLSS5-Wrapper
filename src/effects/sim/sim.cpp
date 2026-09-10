@@ -294,10 +294,11 @@ struct ModelCheck
     const Result<NrIntensity, UnitError> intensity = NrIntensityTag::Parse(static_cast<float>(value % 101u) / 100.0f);
     ENSURE(intensity.has_value());
     return LiveSettings{
-        (value % 2u) == 0u,  NrTuning{ d.tuning.preset, *intensity, d.tuning.style, d.tuning.localStructure, d.tuning.localTone, d.tuning.skinStructure, d.tuning.autoMask, d.tuning.uiCorrection },
-        (value % 3u) == 0u,  base.mvScaleX,
-        base.mvScaleY,       (value % 5u) != 0u,
-        base.resetThreshold, base.depth
+        (value % 2u) == 0u, NrTuning{ d.tuning.preset, *intensity, d.tuning.style, d.tuning.localStructure, d.tuning.localTone, d.tuning.skinStructure, d.tuning.autoMask, d.tuning.uiCorrection },
+        base.passes,        (value % 3u) == 0u,
+        base.mvScaleX,      base.mvScaleY,
+        (value % 5u) != 0u, base.resetThreshold,
+        base.depth
     };
 }
 

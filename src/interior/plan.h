@@ -38,6 +38,7 @@ struct SessionPlan
     std::optional<SrChoice> superResolution;
     bool neuralRendering;
     NrTuning tuning;
+    PassCount passes;
     MotionBackend motion;
     LevelCount levels;
     LevelIndex finestLevel;

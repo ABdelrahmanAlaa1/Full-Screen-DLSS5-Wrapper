@@ -113,6 +113,11 @@ ResourceId FlowId(LevelIndex level) noexcept
     return ResourceId{ ResourceKind::Flow, *kZeroSet, level, *kZeroBuffer, *kZeroSlot };
 }
 
+ResourceId NrPassId(SetIndex set) noexcept
+{
+    return ResourceId{ ResourceKind::NrPass, set, *kZeroLevel, *kZeroBuffer, *kZeroSlot };
+}
+
 ResourceId BackBufferId(BackBufferIndex index) noexcept
 {
     return ResourceId{ ResourceKind::BackBuffer, *kZeroSet, *kZeroLevel, index, *kZeroSlot };
@@ -135,6 +140,7 @@ std::size_t SlotOf(const ResourceId& id) noexcept
     case ResourceKind::ZeroBuffer: return 5;
     case ResourceKind::SrOutput: return 6;
     case ResourceKind::NrOutput: return 7;
+    case ResourceKind::NrPass: return 38 + id.set.Get();
     case ResourceKind::OpticalFlowOutput: return 8;
     case ResourceKind::BackBuffer: return 9 + id.buffer.Get();
     case ResourceKind::StatsReadback: return 12 + id.slot.Get();
@@ -518,14 +524,50 @@ Result<FramePlan, PlanFrameError> PlanFrame(const SessionPlan& plan, const Frame
                     .and_then([](const Builder& n) { return MoveTo(n, SimpleId(ResourceKind::SrOutput), ResourceState::ShaderRead); });
             };
 
+            // The model runs once, or as many times as asked with each pass reading what the one before it made:
+            // the first reads the picture, the last writes the output that is shown, and the ones between hand
+            // their work on through two intermediates that take turns, so no pass reads the picture it writes.
             static constexpr auto NeuralRenderingSteps = [] [[nodiscard]] (const Builder& b, const SessionPlan& plan, const LiveSettings& controls, bool reset) noexcept -> BuildResult {
-                static constexpr auto NrStep = [] [[nodiscard]] (const SessionPlan& plan, const LiveSettings& live, bool reset) noexcept -> EvaluateNr {
-                    return EvaluateNr{ ModelIoOf(ColorSourceOf(plan), ResourceKind::NrOutput), plan.work, plan.source, live.mvScaleX, live.mvScaleY, reset, live.depthInverted, live.tuning };
+                static constexpr auto PassSet = [] [[nodiscard]] (std::uint32_t pass) noexcept -> SetIndex {
+                    const Result<SetIndex, UnitError> set = SetIndexTag::Parse(pass % 2);
+                    ENSURE(set.has_value());
+                    return *set;
+                };
+
+                static constexpr auto IsLast = [] [[nodiscard]] (const LiveSettings& live, std::uint32_t pass) noexcept -> bool { return pass + 1 == live.passes.Get(); };
+
+                static constexpr auto InputOf = [] [[nodiscard]] (const SessionPlan& plan, std::uint32_t pass) noexcept -> ResourceId {
+                    return IsZero(pass) ? SimpleId(ColorSourceOf(plan)) : NrPassId(PassSet(pass - 1));
+                };
+
+                static constexpr auto OutputOf = [] [[nodiscard]] (const LiveSettings& live, std::uint32_t pass) noexcept -> ResourceId {
+                    return IsLast(live, pass) ? SimpleId(ResourceKind::NrOutput) : NrPassId(PassSet(pass));
+                };
+
+                static constexpr auto NrStep = [] [[nodiscard]] (const SessionPlan& plan, const LiveSettings& live, bool reset, std::uint32_t pass) noexcept -> Result<EvaluateNr, PlanFrameError> {
+                    static constexpr auto FromUnit = [] [[nodiscard]] (UnitError) noexcept -> PlanFrameError { return PlanFrameError::Unit; };
+                    return PassIndexTag::Parse(pass).transform_error(FromUnit).transform([&](PassIndex index) {
+                        return EvaluateNr{ ModelIo{ InputOf(plan, pass), SimpleId(ResourceKind::Depth), SimpleId(ResourceKind::MotionVectors), OutputOf(live, pass) },
+                                           plan.work,
+                                           plan.source,
+                                           live.mvScaleX,
+                                           live.mvScaleY,
+                                           reset,
+                                           live.depthInverted,
+                                           live.tuning,
+                                           index };
+                    });
+                };
+
+                static constexpr auto PassSteps = [] [[nodiscard]] (const Builder& b, const SessionPlan& plan, const LiveSettings& live, bool reset, std::uint32_t pass) noexcept -> BuildResult {
+                    return MoveTo(b, InputOf(plan, pass), ResourceState::ShaderRead)
+                        .and_then([&](const Builder& n) { return MoveTo(n, OutputOf(live, pass), ResourceState::UnorderedAccess); })
+                        .and_then([&](const Builder& n) { return NrStep(plan, live, reset, pass).and_then([&](const EvaluateNr& step) { return Emit(n, Step{ step }); }); });
                 };
                 if (!controls.neuralRendering)
                     return b;
-                return MoveTo(b, SimpleId(ResourceKind::NrOutput), ResourceState::UnorderedAccess)
-                    .and_then([&](const Builder& n) { return Emit(n, Step{ NrStep(plan, controls, reset) }); })
+                return infra::FoldResult(std::views::iota(std::uint32_t{ 0 }, controls.passes.Get()), BuildResult(b),
+                                         [&](const Builder& acc, std::uint32_t pass) { return PassSteps(acc, plan, controls, reset, pass); })
                     .and_then([](const Builder& n) { return MoveTo(n, SimpleId(ResourceKind::NrOutput), ResourceState::ShaderRead); });
             };
 

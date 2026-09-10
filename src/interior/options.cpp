@@ -33,6 +33,7 @@ enum class OptionId : std::uint8_t {
     NrSkin,
     NrAutoMask,
     NrUiCorrection,
+    NrPasses,
     Sr,
     SrPreset,
     Mv,
@@ -100,7 +101,7 @@ struct OptionSpec
     ValueKind kind;
 };
 
-constexpr std::array<OptionSpec, 49> kSpecs{ {
+constexpr std::array<OptionSpec, 50> kSpecs{ {
     { L"help", OptionId::Help, ValueKind::Flag },
     { L"list-monitors", OptionId::ListMonitors, ValueKind::Flag },
     { L"monitor", OptionId::Monitor, ValueKind::MonitorSel },
@@ -119,6 +120,7 @@ constexpr std::array<OptionSpec, 49> kSpecs{ {
     { L"sr-preset", OptionId::SrPreset, ValueKind::UInt },
     { L"mv", OptionId::Mv, ValueKind::Motion },
     { L"mv-level", OptionId::MvLevel, ValueKind::UInt },
+    { L"nr-passes", OptionId::NrPasses, ValueKind::UInt },
     { L"nvof-grid", OptionId::NvofGrid, ValueKind::Grid },
     { L"nvof-perf", OptionId::NvofPerf, ValueKind::Perf },
     { L"depth-value", OptionId::DepthValue, ValueKind::Float },
@@ -312,6 +314,7 @@ struct ValidatedNumbers
 {
     SrPreset srPreset;
     LevelIndex level;
+    PassCount passes;
     DepthValue depth;
     Fraction threshold;
     std::optional<MotionScale> mvScaleX;
@@ -332,11 +335,12 @@ constexpr auto kDefaultThreshold = FractionTag::Parse(0.5f);
 constexpr auto kDefaultPreset = NgxPresetTag::Parse(kShippedNgxPreset); // asking for the one the model has avoids its fallback warning
 constexpr auto kDefaultSrPreset = SrPresetTag::Parse(0);
 constexpr auto kDefaultLevel = LevelIndexTag::Parse(1);
+constexpr auto kDefaultPasses = PassCountTag::Parse(1);
 constexpr auto kDefaultProjectId = ProjectIdText::Parse("5e9b2a44-7c31-4d0e-9f2b-8d3c1a6e7f10");
 static_assert(kDefaultIntensity.has_value() && kDefaultStrength.has_value() && kDefaultSkin.has_value());
 static_assert(kDefaultDepth.has_value() && kDefaultThreshold.has_value());
 static_assert(kDefaultPreset.has_value() && kDefaultSrPreset.has_value());
-static_assert(kDefaultLevel.has_value() && kDefaultProjectId.has_value());
+static_assert(kDefaultLevel.has_value() && kDefaultProjectId.has_value() && kDefaultPasses.has_value());
 
 } // namespace
 
@@ -344,7 +348,7 @@ LiveSettings DefaultLive(const Options& o) noexcept
 {
     const Result<MotionScale, UnitError> one = MotionScaleTag::Parse(1.0f);
     ENSURE(one.has_value());
-    return LiveSettings{ o.neuralRendering, o.tuning, o.depthInverted, o.mvScaleX.value_or(*one), o.mvScaleY.value_or(*one), o.vsync, o.resetThreshold, o.depthValue };
+    return LiveSettings{ o.neuralRendering, o.tuning, o.nrPasses, o.depthInverted, o.mvScaleX.value_or(*one), o.mvScaleY.value_or(*one), o.vsync, o.resetThreshold, o.depthValue };
 }
 
 Options DefaultOptions() noexcept
@@ -357,6 +361,7 @@ Options DefaultOptions() noexcept
         std::nullopt,
         true,
         NrTuning{ *kDefaultPreset, *kDefaultIntensity, NrStyle::Standard, *kDefaultStrength, *kDefaultStrength, *kDefaultSkin, true, true },
+        *kDefaultPasses,
         SrMode::Auto,
         *kDefaultSrPreset,
         MotionBackend::BuiltIn,
@@ -465,9 +470,11 @@ Result<Options, OptionsError> ParseOptions(std::span<const std::wstring_view> ar
             };
             return Validated(list, OptionId::SrPreset, d.srPreset, SrPresetTag::Parse).and_then([&](SrPreset srPreset) {
                 return Validated(list, OptionId::MvLevel, d.motionFinestLevel, LevelIndexTag::Parse).and_then([&](LevelIndex level) {
-                    return Validated(list, OptionId::DepthValue, d.depthValue, DepthValueTag::Parse).and_then([&](DepthValue depth) {
-                        return Validated(list, OptionId::ResetThreshold, d.resetThreshold, FractionTag::Parse).and_then([&](Fraction threshold) {
-                            return ScalesOf(list).transform([&](const ValidatedScales& scales) { return ValidatedNumbers{ srPreset, level, depth, threshold, scales.x, scales.y }; });
+                    return Validated(list, OptionId::NrPasses, d.nrPasses, PassCountTag::Parse).and_then([&](PassCount passes) {
+                        return Validated(list, OptionId::DepthValue, d.depthValue, DepthValueTag::Parse).and_then([&](DepthValue depth) {
+                            return Validated(list, OptionId::ResetThreshold, d.resetThreshold, FractionTag::Parse).and_then([&](Fraction threshold) {
+                                return ScalesOf(list).transform([&](const ValidatedScales& scales) { return ValidatedNumbers{ srPreset, level, passes, depth, threshold, scales.x, scales.y }; });
+                            });
                         });
                     });
                 });
@@ -498,6 +505,7 @@ Result<Options, OptionsError> ParseOptions(std::span<const std::wstring_view> ar
                 RequestedOf(list, OptionId::Target),
                 ValueOr(list, OptionId::Nr, d.neuralRendering),
                 tuning,
+                n.passes,
                 ValueOr(list, OptionId::Sr, d.sr),
                 n.srPreset,
                 ValueOr(list, OptionId::Mv, d.motion),

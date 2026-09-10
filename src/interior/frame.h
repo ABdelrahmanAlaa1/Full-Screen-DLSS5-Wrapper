@@ -19,6 +19,7 @@ enum class ResourceKind : std::uint8_t {
     ZeroBuffer,
     SrOutput,
     NrOutput,
+    NrPass,
     OpticalFlowOutput,
     BackBuffer,
     StatsReadback,
@@ -38,12 +39,14 @@ struct ResourceId
     [[nodiscard]] friend constexpr bool operator==(const ResourceId&, const ResourceId&) noexcept = default;
 };
 
-constexpr std::size_t kSlotCount = 38;
+constexpr std::size_t kSlotCount = 40;
 using StateTable = std::array<ResourceState, kSlotCount>;
 
 [[nodiscard]] ResourceId SimpleId(ResourceKind kind) noexcept;
 [[nodiscard]] ResourceId LumaId(SetIndex set, LevelIndex level) noexcept;
 [[nodiscard]] ResourceId FlowId(LevelIndex level) noexcept;
+// One of the two pictures the model's passes hand each other, taking turns so no pass reads what it writes.
+[[nodiscard]] ResourceId NrPassId(SetIndex set) noexcept;
 [[nodiscard]] ResourceId BackBufferId(BackBufferIndex index) noexcept;
 [[nodiscard]] ResourceId ReadbackId(FrameSlot slot) noexcept;
 [[nodiscard]] std::size_t SlotOf(const ResourceId& id) noexcept;
@@ -123,6 +126,7 @@ struct EvaluateNr
     bool reset;
     bool depthInverted;
     NrTuning tuning;
+    PassIndex pass; // which of the model's instances runs this step, each pass having a history of its own
     [[nodiscard]] friend constexpr bool operator==(const EvaluateNr&, const EvaluateNr&) noexcept = default;
 };
 
