@@ -138,7 +138,8 @@ struct Devices
 {
     real::GpuDevice device;
     std::optional<real::NgxRuntime> runtime;
-    std::optional<real::TrustedFile> model; // held open so the file that was checked is the file that loads
+    std::optional<real::TrustedFile> model;    // held open so the file that was checked is the file that loads
+    std::optional<real::TrustedFile> upscaler; // the same, for the super resolution model when one sits in a folder of ours
 };
 
 [[nodiscard]] bool OffersSuperResolution(const Devices& d) noexcept
@@ -420,28 +421,36 @@ struct Ended
                 });
             };
 
-            // The model is a DLL the loader picks up by name from a folder anyone may write to, so it is checked and
-            // then held open for the life of the session. A missing file is left to the loader, which says so better.
-            static constexpr auto TrustedModel = [] [[nodiscard]] (const Console& console, const real::NgxSettings& settings, bool wanted) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
-                static constexpr auto Checked = [] [[nodiscard]] (const Console& console, const interior::FilePath& file) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
-                    return real::OpenTrusted(file).and_then([&console](real::TrustedFile model) {
-                        return Log(console, LogLevel::Info, "nvngx_dlssnr.dll is signed by NVIDIA").transform([&model] { return std::optional<real::TrustedFile>{ std::move(model) }; });
+            // A model is a DLL the loader picks up by name from a folder anyone may write to, so what is found there
+            // is checked and then held open for the life of the session. A missing file is left to the loader, which
+            // says so better: neural rendering stops without one, and super resolution has the driver's own copy.
+            static constexpr auto TrustedModel = [] [[nodiscard]] (const Console& console, const std::optional<interior::FilePath>& file,
+                                                                   std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
+                static constexpr auto Checked = [] [[nodiscard]] (const Console& console, const interior::FilePath& file,
+                                                                  std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
+                    return real::OpenTrusted(file).and_then([&console, name](real::TrustedFile model) {
+                        return Log(console, LogLevel::Info, infra::Formatted<kLineCapacity>("{} is signed by NVIDIA", name).Get()).transform([&model] {
+                            return std::optional<real::TrustedFile>{ std::move(model) };
+                        });
                     });
                 };
-
-                static constexpr auto ModelToCheck = [] [[nodiscard]] (const real::NgxSettings& settings, bool wanted) noexcept -> std::optional<interior::FilePath> {
-                    return wanted ? real::NeuralRenderingModelFile(settings) : std::nullopt;
-                };
-                const std::optional<interior::FilePath> file = ModelToCheck(settings, wanted);
                 if (!file.has_value())
                     return std::optional<real::TrustedFile>{};
-                return Checked(console, *file);
+                return Checked(console, *file, name);
             };
-            return TrustedModel(console, settings, wantsNgx && b.options.neuralRendering).and_then([&](std::optional<real::TrustedFile> model) {
-                return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
-                    return Devices{ std::move(device), std::move(runtime), std::move(model) };
+
+            static constexpr auto ModelToCheck = [] [[nodiscard]] (const std::optional<interior::FilePath>& found, bool wanted) noexcept -> std::optional<interior::FilePath> {
+                return wanted ? found : std::nullopt;
+            };
+            const bool wantsSr = interior::WantsSuperResolution(b.options, b.geometry.sourceExtent, b.geometry.targetExtent);
+            return TrustedModel(console, ModelToCheck(real::NeuralRenderingModelFile(settings), wantsNgx && b.options.neuralRendering), "nvngx_dlssnr.dll")
+                .and_then([&](std::optional<real::TrustedFile> model) {
+                    return TrustedModel(console, ModelToCheck(real::SuperResolutionModelFile(settings), wantsSr), "nvngx_dlss.dll").and_then([&](std::optional<real::TrustedFile> upscaler) {
+                        return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
+                            return Devices{ std::move(device), std::move(runtime), std::move(model), std::move(upscaler) };
+                        });
+                    });
                 });
-            });
         };
         const bool wantsNgx = WantsNgx(b.options, b.geometry);
         return real::CreateGpuDevice(real::DeviceSettings{ b.options.debugLayer, b.options.adapter }).and_then([&](real::GpuDevice device) {

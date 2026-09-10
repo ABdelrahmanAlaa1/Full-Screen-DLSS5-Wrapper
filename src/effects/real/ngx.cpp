@@ -24,15 +24,40 @@ constexpr char kNeuralRenderingAvailable[] = "DLSSNR.Available";
 // 310.8 model does not, so both spellings are tried and silence is taken at face value.
 constexpr std::array<const char*, 2> kPresetCountNames{ "DLSSNR.PresetCount", "DLSSNR.Presets" };
 constexpr std::wstring_view kNeuralRenderingModel = L"\\nvngx_dlssnr.dll";
-constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + kNeuralRenderingModel.size() + 1;
+constexpr std::wstring_view kSuperResolutionModel = L"\\nvngx_dlss.dll";
+constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + std::max(kNeuralRenderingModel.size(), kSuperResolutionModel.size()) + 1;
 
-[[nodiscard]] std::array<wchar_t, kModelPathCapacity> ModelPathIn(std::wstring_view directory) noexcept
+[[nodiscard]] std::array<wchar_t, kModelPathCapacity> ModelPathIn(std::wstring_view directory, std::wstring_view model) noexcept
 {
     std::array<wchar_t, kModelPathCapacity> chars{};
     // WAIVER(R2): a local buffer filled once, before use, from two bounded pieces.
     std::ranges::copy(directory, chars.begin());
-    std::ranges::copy(kNeuralRenderingModel, chars.begin() + static_cast<std::ptrdiff_t>(directory.size()));
+    std::ranges::copy(model, chars.begin() + static_cast<std::ptrdiff_t>(directory.size()));
     return chars;
+}
+
+// Where the loader will find a model of ours: the folder the executable sits in, then --ngx-path. Both are
+// folders anyone may write to, which is why what is found there is checked before the loader is let at it.
+[[nodiscard]] std::optional<interior::DirectoryPath> ModelLocation(const NgxSettings& settings, std::wstring_view model) noexcept
+{
+    static constexpr auto ModelIn = [] [[nodiscard]] (const interior::DirectoryPath& directory, std::wstring_view model) noexcept -> std::optional<interior::DirectoryPath> {
+        static constexpr auto HasModel = [] [[nodiscard]] (const interior::DirectoryPath& directory, std::wstring_view model) noexcept -> bool {
+            return !directory.IsEmpty() && ::GetFileAttributesW(ModelPathIn(directory.Get(), model).data()) != INVALID_FILE_ATTRIBUTES;
+        };
+        if (!HasModel(directory, model))
+            return std::nullopt;
+        return directory;
+    };
+    return ModelIn(settings.executableDirectory, model).or_else([&settings, model] { return ModelIn(settings.featurePath, model); });
+}
+
+[[nodiscard]] std::optional<interior::FilePath> ModelFile(const NgxSettings& settings, std::wstring_view model) noexcept
+{
+    return ModelLocation(settings, model).and_then([model](const interior::DirectoryPath& directory) {
+        return interior::FilePath::Parse(ModelPathIn(directory.Get(), model).data())
+            .transform([](const interior::FilePath& path) { return std::optional<interior::FilePath>{ path }; })
+            .value_or(std::nullopt);
+    });
 }
 
 [[nodiscard]] Status<Error> CheckNgx(NVSDK_NGX_Result result, ApiCall call) noexcept
@@ -216,24 +241,17 @@ void FeatureReleaser::operator()(NVSDK_NGX_Handle* handle) const noexcept
 
 std::optional<interior::DirectoryPath> NeuralRenderingModelLocation(const NgxSettings& settings) noexcept
 {
-    static constexpr auto ModelIn = [] [[nodiscard]] (const interior::DirectoryPath& directory) noexcept -> std::optional<interior::DirectoryPath> {
-        static constexpr auto HasModel = [] [[nodiscard]] (const interior::DirectoryPath& directory) noexcept -> bool {
-            return !directory.IsEmpty() && ::GetFileAttributesW(ModelPathIn(directory.Get()).data()) != INVALID_FILE_ATTRIBUTES;
-        };
-        if (!HasModel(directory))
-            return std::nullopt;
-        return directory;
-    };
-    return ModelIn(settings.executableDirectory).or_else([&settings] { return ModelIn(settings.featurePath); });
+    return ModelLocation(settings, kNeuralRenderingModel);
 }
 
 std::optional<interior::FilePath> NeuralRenderingModelFile(const NgxSettings& settings) noexcept
 {
-    return NeuralRenderingModelLocation(settings).and_then([](const interior::DirectoryPath& directory) {
-        return interior::FilePath::Parse(ModelPathIn(directory.Get()).data())
-            .transform([](const interior::FilePath& path) { return std::optional<interior::FilePath>{ path }; })
-            .value_or(std::nullopt);
-    });
+    return ModelFile(settings, kNeuralRenderingModel);
+}
+
+std::optional<interior::FilePath> SuperResolutionModelFile(const NgxSettings& settings) noexcept
+{
+    return ModelFile(settings, kSuperResolutionModel);
 }
 
 Requirement RequirementOf(const GpuDevice& gpu, const NgxSettings& settings, NVSDK_NGX_Feature feature) noexcept

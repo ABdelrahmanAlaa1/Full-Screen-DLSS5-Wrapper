@@ -32,6 +32,9 @@ struct NgxSettings
 [[nodiscard]] std::optional<interior::DirectoryPath> NeuralRenderingModelLocation(const NgxSettings& settings) noexcept;
 // The file the loader will build feature 18 from, when there is one to be found.
 [[nodiscard]] std::optional<interior::FilePath> NeuralRenderingModelFile(const NgxSettings& settings) noexcept;
+// The file the loader will build feature 1 from, when one sits in a folder of ours. Nothing there does not
+// mean super resolution is unavailable: the driver carries a copy of its own, which the driver store keeps.
+[[nodiscard]] std::optional<interior::FilePath> SuperResolutionModelFile(const NgxSettings& settings) noexcept;
 
 // The driver keeps the path pointers, so an NgxPaths lives on the heap and never moves.
 class NgxPaths final
