@@ -55,13 +55,13 @@ constexpr std::size_t kListPerLine = 2;
 constexpr wchar_t kChevronGlyph[] = L"\uE70D";
 constexpr wchar_t kNoticeLine[] = L"NOTICE: A game with \"True\" native DLSS5 will likely look different (expand for details)";
 constexpr wchar_t kNoticeBody[] =
-    L"This app simply takes a flat video stream input and passes it to the model. A native game would provide additional data such as motion data, object depth data, etc.\r\n\r\n",
+    L"This app simply takes a flat video stream input and passes it to the model. A native game would provide additional data such as motion data, object depth data, etc.\r\n\r\n"
     L"A game hands the model its own motion vectors, its own depth buffer and the sub-pixel jitter it rendered with, frame by frame, before anything is composited. This app has none of "
     L"that. It captures the finished desktop and makes substitutes: one flat depth plane, and motion guessed by matching blocks between two pictures that have already been drawn, "
     L"resized and blended by the window manager.\r\n\r\n"
-    L"So the model here is working from worse inputs than it was built for, on an image that has already lost the information it wants. What it does to the desktop is not what it does in a game.\r\n\r\n"
+    L"So the model here is working from worse inputs than it was built for, on an image that has already lost the information it wants. What it does to the desktop is not what it does in a "
+    L"game.\r\n\r\n"
     L"This should be considered an experimental demo, NOT a preview of what it does when it is used properly.";
-constexpr int kNoticeLines = 9;
 constexpr int kExpanderWidth = 28;
 
 constexpr int kMinRowsPerColumn = 7;
@@ -109,7 +109,8 @@ constexpr std::array<FieldSpec, kFieldCount> kFields{ {
     { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, 7, nullptr },
     { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, 15, nullptr },
     { L"Model passes",
-      L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run.\r\n(You can manually set this higher than the slider limit)",
+      L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run.\r\n(You can manually set this "
+      L"higher than the slider limit)",
       1, 8, 1, 1, std::numeric_limits<int>::max(), kPassesWarning },
 } };
 
@@ -275,6 +276,7 @@ struct Metrics
     int dpi;
     int line;
     int rows;                // slots to a column, taken from whichever page needs the most
+    int body;                // how tall the notice's own text is, measured in the font it is drawn in
     const PanelLists* lists; // borrowed for as long as the panel is being built, which is the only time it is read
     [[nodiscard]] int Of(int reference) const noexcept { return ::MulDiv(reference, dpi, kReferenceDpi); }
     [[nodiscard]] int LabelHeight() const noexcept { return line + Of(5); }
@@ -284,7 +286,7 @@ struct Metrics
     // The rows, then the notice under them, then the margin.
     [[nodiscard]] int PageHeight() const noexcept { return rows * RowHeight() + ControlHeight() + Of(2 * kMargin); }
     [[nodiscard]] int NoticeTop() const noexcept { return PageTop() + rows * RowHeight() + Of(kMargin); }
-    [[nodiscard]] int BodyHeight() const noexcept { return kNoticeLines * line + Of(kMargin); }
+    [[nodiscard]] int BodyHeight() const noexcept { return body + Of(kMargin); }
 };
 
 struct Placement
@@ -1242,6 +1244,23 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 return height;
             };
 
+            // The notice is as tall as its own text: how many lines the words wrap into at the panel's width is
+            // the display's to answer, not a number kept here beside them.
+            static constexpr auto BodyHeightOf = [] [[nodiscard]] (HWND window, HFONT font, int dpi) noexcept -> int {
+                static constexpr auto MeasuredOn = [] [[nodiscard]] (HDC dc, HFONT font, int width) noexcept -> int {
+                    const HGDIOBJ previous = ::SelectObject(dc, font);
+                    RECT box{ 0, 0, width, 0 }; // WAIVER(R2): an answer record filled once by the measurement below.
+                    const int height = ::DrawTextW(dc, kNoticeBody, -1, &box, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                    (void)::SelectObject(dc, previous);
+                    return height;
+                };
+                const HDC dc = ::GetDC(window);
+                ENSURE(dc != nullptr);
+                const int height = MeasuredOn(dc, font, ::MulDiv(kPanelWidth - 2 * kMargin, dpi, kReferenceDpi));
+                ENSURE(::ReleaseDC(window, dc) == 1);
+                return height;
+            };
+
             // The shortest column every page shown fits two of. The panel is as tall as that and no taller, so pages
             // left out cost nothing and a page losing rows makes the window shorter.
             static constexpr auto RowsPerColumn = [] [[nodiscard]] (const PanelLists& lists, bool showInert) noexcept -> int {
@@ -1260,7 +1279,8 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 const auto found = std::ranges::find_if(depths, [&lists, showInert](int rows) { return FitsAt(lists, showInert, static_cast<std::size_t>(rows)); });
                 return found == depths.end() ? kMaxRowsPerColumn : *found;
             };
-            return Metrics{ static_cast<int>(::GetDpiForWindow(window)), LineHeight(window, font), RowsPerColumn(lists, showInert), &lists };
+            const int dpi = static_cast<int>(::GetDpiForWindow(window));
+            return Metrics{ dpi, LineHeight(window, font), RowsPerColumn(lists, showInert), BodyHeightOf(window, font, dpi), &lists };
         };
 
         static constexpr auto ResizeToFit = [](HWND window, const Metrics& m) noexcept -> void {
