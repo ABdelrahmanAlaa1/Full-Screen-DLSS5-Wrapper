@@ -41,7 +41,7 @@ std::string_view UsageText() noexcept
            "  --nr-automask on|off       Let the model detect skin itself (default on)\n"
            "  --nr-ui-correction on|off  Model UI correction (default on). The model reads a UI layer that\n"
            "                             DlssScreen does not give it, so this is inert as wired\n"
-           "  --nr-passes 1..8           Run the model on its own output this many times a frame (default 1).\n"
+           "  --nr-passes 1..32          Run the model on its own output this many times a frame (default 1).\n"
            "                             Each pass runs the whole model again, with a history of its own, on\n"
            "                             the picture the pass before it made: three passes cost three times\n"
            "                             one and the picture falls three times as far behind. Experimental\n"

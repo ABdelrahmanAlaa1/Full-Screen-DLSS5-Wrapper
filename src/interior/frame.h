@@ -156,7 +156,7 @@ struct Present
 
 using Step = std::variant<Transition, Dispatch, CopyBuffer, ClearTarget, EvaluateSr, EvaluateNr, Draw, Submit, Present>;
 
-constexpr std::size_t kMaxSteps = 192;
+constexpr std::size_t kMaxSteps = 288; // the frame at its longest, with every pass the model may be asked for
 using StepList = infra::BoundedVector<Step, kMaxSteps>;
 
 struct FrameState

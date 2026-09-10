@@ -74,7 +74,7 @@ struct FieldSpec
     int maximum; // where the slider ends, which for an open field is only where it ends to begin with
     int steps;
     int increment;          // what one click of an arrow moves, in the same steps as the rest
-    bool open;              // whether the model lets the number go on past the slider's end
+    int ceiling;            // as far as the number may be typed or stepped: the slider's end, or past it where the model puts no top on it
     const wchar_t* warning; // what a glyph beside the label warns of, or nothing
 };
 
@@ -84,27 +84,29 @@ constexpr wchar_t kPassesWarning[] = L"Experimental. Every pass runs the whole m
 // As far as a number the model puts no top on may be typed or stepped. The slider stretches to follow.
 constexpr int kOpenUnits = 1000;
 
-[[nodiscard]] constexpr int CeilingOf(const FieldSpec& spec) noexcept
+[[nodiscard]] constexpr int Open(int steps) noexcept
 {
-    return spec.open ? kOpenUnits * spec.steps : spec.maximum;
+    return kOpenUnits * steps;
 }
 
 constexpr std::array<FieldSpec, kFieldCount> kFields{ {
-    { L"Intensity", L"How much of the model's work to keep. Past 1 the model makes no further difference, so 1 is the whole of it.", 0, 100, 100, 10, false, nullptr },
+    { L"Intensity", L"How much of the model's work to keep. Past 1 the model makes no further difference, so 1 is the whole of it.", 0, 100, 100, 10, 100, nullptr },
     { L"Local structure", L"Detail the model adds within a region. The slider's end is not the model's: type or step past it and the slider follows. Does nothing while auto mask is off.", 0, 1000,
-      100, 100, true, nullptr },
-    { L"Local tone", L"How far the model moves local brightness. The slider's end is not the model's: type or step past it and the slider follows.", 0, 1000, 100, 100, true, nullptr },
-    { L"Skin structure", L"Detail on skin. The slider's end is not the model's. Does nothing while auto mask is off, or while skin follows local structure.", 0, 1000, 100, 100, true, nullptr },
-    { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, false, nullptr },
-    { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, false, nullptr },
-    { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, 10, false, nullptr },
-    { L"Depth plane", L"The desktop has no depth, so one flat value stands in for all of it. Every pixel carries the same number, so changing it does nothing you can see.", 0, 100, 100, 10, false,
+      100, 100, Open(100), nullptr },
+    { L"Local tone", L"How far the model moves local brightness. The slider's end is not the model's: type or step past it and the slider follows.", 0, 1000, 100, 100, Open(100), nullptr },
+    { L"Skin structure", L"Detail on skin. The slider's end is not the model's. Does nothing while auto mask is off, or while skin follows local structure.", 0, 1000, 100, 100, Open(100), nullptr },
+    { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, 400, nullptr },
+    { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, 400, nullptr },
+    { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, 10, 100, nullptr },
+    { L"Depth plane", L"The desktop has no depth, so one flat value stands in for all of it. Every pixel carries the same number, so changing it does nothing you can see.", 0, 100, 100, 10, 100,
       nullptr },
-    { L"Reset threshold", L"How much of the picture has to go unmatched before the model's history is thrown away.", 0, 100, 100, 10, false, nullptr },
-    { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, false, nullptr },
-    { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, false, nullptr },
-    { L"Model passes", L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run.", 1,
-      static_cast<int>(interior::kMaxPasses), 1, 1, false, kPassesWarning },
+    { L"Reset threshold", L"How much of the picture has to go unmatched before the model's history is thrown away.", 0, 100, 100, 10, 100, nullptr },
+    { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, 7, nullptr },
+    { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, 15, nullptr },
+    { L"Model passes",
+      L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run; the slider ends at 8, and "
+      L"typing or stepping goes on past it.",
+      1, 8, 1, 1, static_cast<int>(interior::kMaxPasses), kPassesWarning },
 } };
 
 struct ToggleSpec
@@ -387,7 +389,7 @@ LRESULT CALLBACK PanelProc(HWND window, UINT message, WPARAM w, LPARAM l) noexce
                                 const std::optional<int> now = TypedSteps(box, spec);
                                 if (!now.has_value())
                                     return;
-                                WriteBox(box, std::clamp(*now + steps * spec.increment, spec.minimum, CeilingOf(spec)), spec);
+                                WriteBox(box, std::clamp(*now + steps * spec.increment, spec.minimum, spec.ceiling), spec);
                             };
                             const std::size_t field = static_cast<std::size_t>(::GetWindowLongPtrW(delta->hdr.hwndFrom, GWLP_USERDATA));
                             HWND box = reinterpret_cast<HWND>(::SendMessageW(delta->hdr.hwndFrom, UDM_GETBUDDY, 0, 0));
@@ -447,7 +449,7 @@ constexpr wchar_t kReleaseHint[] = L"Let the window go and capture a monitor aga
     const float value = std::wcstof(text.data(), &end);
     if (end == text.data())
         return std::nullopt;
-    return std::clamp(static_cast<int>(std::lround(value * static_cast<float>(spec.steps))), spec.minimum, CeilingOf(spec));
+    return std::clamp(static_cast<int>(std::lround(value * static_cast<float>(spec.steps))), spec.minimum, spec.ceiling);
 }
 
 [[nodiscard]] int Settled(const ControlPanel& panel, std::size_t field) noexcept
@@ -584,7 +586,7 @@ void SetChecked(HWND check, bool checked) noexcept
 
 [[nodiscard]] int StepsOf(float value, const FieldSpec& spec) noexcept
 {
-    return std::clamp(static_cast<int>(std::lround(value * static_cast<float>(spec.steps))), spec.minimum, CeilingOf(spec));
+    return std::clamp(static_cast<int>(std::lround(value * static_cast<float>(spec.steps))), spec.minimum, spec.ceiling);
 }
 
 [[nodiscard]] std::array<float, kFieldCount> StartingValues(const interior::Options& o, const interior::LiveSettings& live) noexcept
@@ -1365,7 +1367,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                 (void)::SendMessageW(spin, UDM_SETACCEL, curve.size(), reinterpret_cast<LPARAM>(curve.data()));
                             };
                             (void)::SendMessageW(spin, UDM_SETBUDDY, reinterpret_cast<WPARAM>(box), 0);
-                            (void)::SendMessageW(spin, UDM_SETRANGE32, static_cast<WPARAM>(spec.minimum), static_cast<LPARAM>(CeilingOf(spec)));
+                            (void)::SendMessageW(spin, UDM_SETRANGE32, static_cast<WPARAM>(spec.minimum), static_cast<LPARAM>(spec.ceiling));
                             (void)::SendMessageW(spin, UDM_SETPOS32, 0, steps);
                             AccelerateSpin(spin, spec);
                             return spin;
@@ -1378,10 +1380,10 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         return ArrangedSpin(spin, box, spec, steps);
                     };
                     const auto steps = [&values](std::size_t f) { return StepsOf(values[f], kFields[f]); };
-                    built.labels = infra::Generated<HWND, kFieldCount>(
-                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, LabelWidthOf(f)); });
                     // A label stops short of the end of its line when a glyph sits there: a later child sits under an earlier one.
                     static constexpr auto LabelWidthOf = [] [[nodiscard]] (std::size_t f) noexcept -> int { return kFields[f].warning == nullptr ? kColumnWidth : kResetOffset - kMargin; };
+                    built.labels = infra::Generated<HWND, kFieldCount>(
+                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, LabelWidthOf(f)); });
                     built.sliders = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateSlider(parent, m, kFields[f], PlaceOfRow(Kind::Field, f, m), steps(f)); });
                     built.boxes = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
