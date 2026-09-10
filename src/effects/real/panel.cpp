@@ -26,7 +26,9 @@ constexpr wchar_t kCrosshairClass[] = L"DlssScreenWindowPicker";
 constexpr wchar_t kOutlineClass[] = L"DlssScreenPickOutline";
 constexpr int kCrosshairWidth = 34;
 constexpr int kReferenceDpi = 96;
-constexpr int kTextCapacity = 32;
+// The longest text a control shows is a window's title. A write is skipped only when all of it reads back,
+// so a shorter buffer had the picked window's name rewritten, and repainted, every frame.
+constexpr int kTextCapacity = static_cast<int>(interior::WindowTitle::Capacity) + 1;
 constexpr int kPathCapacity = 260;
 constexpr float kDefaultSplit = 0.5f;
 constexpr auto kCentre = interior::FractionTag::Parse(kDefaultSplit);
