@@ -19,6 +19,13 @@ using ABI::Windows::UI::WindowId;
 // Every step is written to a file of its own: it fails in a way that reads as success.
 constexpr wchar_t kNotesFile[] = L"FullScreenWrapperForDLSS5-exclusion.log";
 
+[[nodiscard]] bool& Wanted() noexcept
+{
+    // WAIVER(R11): one switch for the program, set from the options before anything has anything to note.
+    static bool wanted = false;
+    return wanted;
+}
+
 void Note(std::string_view line) noexcept
 {
     static constexpr auto Notes = [] [[nodiscard]] () noexcept -> HANDLE {
@@ -26,7 +33,7 @@ void Note(std::string_view line) noexcept
         static const HANDLE file = ::CreateFileW(kNotesFile, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         return file;
     };
-    if (Notes() == INVALID_HANDLE_VALUE)
+    if (!Wanted() || Notes() == INVALID_HANDLE_VALUE)
         return;
     DWORD written = 0; // WAIVER(R2): what the write reports, which nothing reads.
     (void)::WriteFile(Notes(), line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
@@ -391,6 +398,11 @@ bool SessionCanExcludeWindows(IGraphicsCaptureSession* session) noexcept
     return DisplaySessionOf(session) != nullptr;
 }
 
+void NoteExclusionsTo(bool wanted) noexcept
+{
+    Wanted() = wanted; // WAIVER(R2): the one switch, set once before the first note.
+}
+
 void NoteExclusion(const char* line) noexcept
 {
     Note(line);
@@ -415,8 +427,10 @@ void NoteFrameConfiguration(IUnknown* frame) noexcept
             return;
         NoteConfigurationChange(iteration);
     };
+    // Asked of every frame, so the switch is read before the interface is: a session not writing notes
+    // should not be paying for a query per frame either.
     Com<IFrameConfiguration> which;
-    if (FAILED(frame->QueryInterface(kFrameConfigurationIid, reinterpret_cast<void**>(which.GetAddressOf()))))
+    if (!Wanted() || FAILED(frame->QueryInterface(kFrameConfigurationIid, reinterpret_cast<void**>(which.GetAddressOf()))))
         return;
     NoteConfigurationOf(which.Get());
 }

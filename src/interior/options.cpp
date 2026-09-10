@@ -69,6 +69,7 @@ enum class OptionId : std::uint8_t {
     CubinCache,
     ShowInert,
     ExcludeOwnWindows,
+    ExclusionLog,
 };
 
 enum class ValueKind : std::uint8_t {
@@ -101,7 +102,7 @@ struct OptionSpec
     ValueKind kind;
 };
 
-constexpr std::array<OptionSpec, 50> kSpecs{ {
+constexpr std::array<OptionSpec, 51> kSpecs{ {
     { L"help", OptionId::Help, ValueKind::Flag },
     { L"list-monitors", OptionId::ListMonitors, ValueKind::Flag },
     { L"monitor", OptionId::Monitor, ValueKind::MonitorSel },
@@ -152,6 +153,7 @@ constexpr std::array<OptionSpec, 50> kSpecs{ {
     { L"cubin-cache", OptionId::CubinCache, ValueKind::Bool },
     { L"show-inert", OptionId::ShowInert, ValueKind::Bool },
     { L"exclude-own-windows", OptionId::ExcludeOwnWindows, ValueKind::Bool },
+    { L"exclusion-log", OptionId::ExclusionLog, ValueKind::Bool },
 } };
 
 struct FlagValue
@@ -397,6 +399,7 @@ Options DefaultOptions() noexcept
         true,
         false,
         true,
+        false,
     };
 }
 
@@ -541,6 +544,7 @@ Result<Options, OptionsError> ParseOptions(std::span<const std::wstring_view> ar
                 ValueOr(list, OptionId::CubinCache, d.cubinCache),
                 ValueOr(list, OptionId::ShowInert, d.showInert),
                 ValueOr(list, OptionId::ExcludeOwnWindows, d.excludeOwnWindows),
+                ValueOr(list, OptionId::ExclusionLog, d.exclusionLog),
             };
         };
         const Options d = DefaultOptions();

@@ -135,6 +135,13 @@ constexpr std::array<std::wstring_view, 12> kVocabulary{ L"--monitor", L"all",  
     return parsed.has_value() && parsed->depthInverted == wanted;
 }
 
+[[nodiscard]] bool TheExclusionLogIsOffUnlessAsked(infra::RngState&) noexcept
+{
+    const std::array<std::wstring_view, 1> on{ L"--exclusion-log=on" };
+    const auto asked = ParseOptions(on);
+    return !DefaultOptions().exclusionLog && asked.has_value() && asked->exclusionLog;
+}
+
 [[nodiscard]] bool ShowInertRoundTrips(infra::RngState& rng) noexcept
 {
     const bool wanted = proptest::DrawBool(rng);
@@ -258,6 +265,7 @@ std::uint32_t OptionsSuite(std::uint64_t seed) noexcept
     failures += Failures(proptest::ForAll("a motion scale not asked for stays absent", seed, 1, MotionScaleIsAbsentUnlessAsked));
     failures += Failures(proptest::ForAll("--depth-inverted round-trips", seed, 20, DepthInversionRoundTrips));
     failures += Failures(proptest::ForAll("--show-inert round-trips", seed, 20, ShowInertRoundTrips));
+    failures += Failures(proptest::ForAll("the exclusion log is off unless asked for", seed, 1, TheExclusionLogIsOffUnlessAsked));
     failures += Failures(proptest::ForAll("--target with --monitor all is rejected", seed, 1, TargetWithAllIsRejected));
     failures += Failures(proptest::ForAll("last occurrence wins", seed, 20, LastOccurrenceWins));
     failures += Failures(proptest::ForAll("missing value is reported", seed, 1, MissingValueIsReported));

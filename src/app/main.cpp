@@ -4,6 +4,7 @@
 #include "effects/real/console.h"
 #include "effects/real/device.h"
 #include "effects/real/environment.h"
+#include "effects/real/exclusion.h"
 #include "effects/real/ngx.h"
 #include "effects/real/panel.h"
 #include "effects/real/trust.h"
@@ -828,6 +829,7 @@ constexpr std::string_view kWindowGoneText = "The window could not be captured, 
                 const Result<Console, Error> console = real::OpenConsole(options.logLevel, options.logFile, options.console);
                 if (!console.has_value())
                     return ReportEarly(console.error());
+                real::NoteExclusionsTo(options.exclusionLog);
                 return Finish(*console, Run(*console, options));
             };
             if (!options.listMonitors)

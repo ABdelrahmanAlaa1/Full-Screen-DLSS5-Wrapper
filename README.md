@@ -192,7 +192,12 @@ Hotkeys (global): `Ctrl+Alt+Shift+O` original/processed, `Ctrl+Alt+Shift+C` spli
 Every failure stops the program with a message and a non-zero exit code. There are no silent fallbacks:
 if neural rendering is requested and unavailable, the tool exits instead of running as a passthrough
 (pass `--nr off` or `--sr off` to run without a model). A contract violation aborts and writes the call
-trace ring to `FullScreenWrapperForDLSS5-trace.txt` next to the working directory.
+trace ring to `FullScreenWrapperForDLSS5-trace.txt` next to the working directory. That file is written
+only when a contract fails, which is to say when the program is already stopping.
+
+Nothing else is written beside the executable unless it is asked for: `--exclusion-log on` writes what the
+capture was asked to leave out and what it answered to `FullScreenWrapperForDLSS5-exclusion.log`, and
+`--log-file PATH` mirrors the console log to a file of your choosing. Neither happens by default.
 
 ## What the model does with these values
 

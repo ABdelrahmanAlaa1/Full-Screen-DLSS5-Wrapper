@@ -15,6 +15,10 @@ namespace real {
 // the session itself rather than assumed, because what follows a yes is uncovering the windows.
 [[nodiscard]] bool ExcludeWindowsFrom(ABI::Windows::Graphics::Capture::IGraphicsCaptureSession* session, std::span<const HWND> windows) noexcept;
 
+// Whether the notes below are written at all. Off until this says otherwise, so a session that was not
+// asked for them writes no file; a session that was gets every step of what the exclusion tried.
+void NoteExclusionsTo(bool wanted) noexcept;
+
 // Adds a line to the log the exclusion writes, so what was tried is all in one place.
 void NoteExclusion(const char* line) noexcept;
 
