@@ -507,8 +507,13 @@ struct Ended
                                                        p.superResolution->input.height.Get(), p.superResolution->output.width.Get(), p.superResolution->output.height.Get());
             };
 
-            static constexpr auto NeuralRenderingText = [] [[nodiscard]] (const SessionPlan& p) noexcept -> std::string_view {
-                return p.neuralRendering ? "DLSS 5 Neural Rendering" : "neural rendering off";
+            static constexpr auto NeuralRenderingText = [] [[nodiscard]] (const SessionPlan& p) noexcept -> Line {
+                static constexpr auto PassesText = [] [[nodiscard]] (const SessionPlan& p) noexcept -> Line {
+                    if (p.passes.Get() == 1)
+                        return infra::Formatted<kLineCapacity>("DLSS 5 Neural Rendering");
+                    return infra::Formatted<kLineCapacity>("DLSS 5 Neural Rendering, {} passes", p.passes.Get());
+                };
+                return p.neuralRendering ? PassesText(p) : infra::Formatted<kLineCapacity>("neural rendering off");
             };
 
             static constexpr auto LogTuningIf = [] [[nodiscard]] (const Console& console, const SessionPlan& p) noexcept -> Status<Error> {
@@ -523,7 +528,7 @@ struct Ended
                 return LogTuning(console, p.tuning);
             };
             const Line line = infra::Formatted<kLineCapacity>("Pipeline: capture {}x{} -> {} -> {} -> {} -> present {}x{}", p.source.width.Get(), p.source.height.Get(), MotionName(p.motion),
-                                                              SuperResolutionText(p).Get(), NeuralRenderingText(p), p.target.width.Get(), p.target.height.Get());
+                                                              SuperResolutionText(p).Get(), NeuralRenderingText(p).Get(), p.target.width.Get(), p.target.height.Get());
             return Log(console, LogLevel::Info, line.Get()).and_then([&] { return LogTuningIf(console, p); });
         };
 

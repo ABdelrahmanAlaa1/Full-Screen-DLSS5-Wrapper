@@ -24,7 +24,8 @@ using interior::SimpleId;
 constexpr std::uint64_t kReportIntervalMicroseconds = 5000000;
 constexpr auto kZeroSlot = interior::FrameSlotTag::Parse(0);
 constexpr auto kZeroSet = interior::SetIndexTag::Parse(0);
-static_assert(kZeroSlot.has_value() && kZeroSet.has_value());
+constexpr auto kOneSet = interior::SetIndexTag::Parse(1);
+static_assert(kZeroSlot.has_value() && kZeroSet.has_value() && kOneSet.has_value());
 
 using TableResult = Result<ResourceTable, Error>;
 
@@ -73,16 +74,44 @@ struct Created
     interior::FenceValue fence;
 };
 
-// Builds the neural rendering feature at the given tuning, replacing whatever was there. The model reads
-// its tuning while the feature is built, so a value the operator changes is only honoured by rebuilding.
-[[nodiscard]] Result<Created, Error> BuiltNeuralRendering(const Gpu& gpu, const SessionPlan& plan, const interior::NrTuning& tuning, Created c) noexcept
+struct BuiltPass
 {
-    REQUIRE(c.models.runtime.has_value());
-    return OpenList(gpu, *kZeroSlot).and_then([&] { return CreateNeuralRendering(*c.models.runtime, gpu.list.Get(), tuning, plan.work); }).and_then([&](Feature feature) {
-        return FlushList(gpu, c.fence).transform([&](interior::FenceValue fence) {
-            return Created{ Models{ std::move(c.models.runtime), std::move(c.models.superResolution), std::move(feature), tuning }, fence };
+    Feature feature;
+    interior::FenceValue fence;
+};
+
+struct Building
+{
+    Passes passes;
+    interior::FenceValue fence;
+};
+
+// Builds the neural rendering instances at the given tuning, one per pass, replacing whatever was there.
+// The model reads its tuning while an instance is built, so a value the operator changes is only honoured
+// by rebuilding, and a changed count is a different number of instances.
+[[nodiscard]] Result<Created, Error> BuiltNeuralRendering(const Gpu& gpu, const SessionPlan& plan, const BuiltModel& wanted, Created c) noexcept
+{
+    static constexpr auto BuiltPassOf = [] [[nodiscard]] (const Gpu& gpu, const NgxRuntime& runtime, const SessionPlan& plan, const interior::NrTuning& tuning,
+                                                          interior::FenceValue after) noexcept -> Result<BuiltPass, Error> {
+        return OpenList(gpu, *kZeroSlot).and_then([&] { return CreateNeuralRendering(runtime, gpu.list.Get(), tuning, plan.work); }).and_then([&](Feature feature) {
+            return FlushList(gpu, after).transform([&feature](interior::FenceValue fence) { return BuiltPass{ std::move(feature), fence }; });
         });
-    });
+    };
+
+    static constexpr auto Holding = [] [[nodiscard]] (Passes so, std::size_t at, Feature feature) noexcept -> Passes {
+        so[at] = std::move(feature); // WAIVER(R2): the array is this call's own, filled at one slot and handed back.
+        return so;
+    };
+
+    static constexpr auto WithPass = [] [[nodiscard]] (const Gpu& gpu, const NgxRuntime& runtime, const SessionPlan& plan, const interior::NrTuning& tuning, Building so,
+                                                       std::uint32_t pass) noexcept -> Result<Building, Error> {
+        return BuiltPassOf(gpu, runtime, plan, tuning, so.fence).transform([&](BuiltPass built) { return Building{ Holding(std::move(so.passes), pass, std::move(built.feature)), built.fence }; });
+    };
+    REQUIRE(c.models.runtime.has_value());
+    const NgxRuntime& runtime = *c.models.runtime;
+    return infra::FoldOwned(std::views::iota(std::uint32_t{ 0 }, wanted.passes.Get()), Result<Building, Error>(Building{ Passes{}, c.fence }),
+                            [&](Building so, std::uint32_t pass) { return WithPass(gpu, runtime, plan, wanted.tuning, std::move(so), pass); })
+        .transform([&](Building built) { return Created{ Models{ std::move(c.models.runtime), std::move(c.models.superResolution), std::move(built.passes), wanted }, built.fence }; });
 }
 
 [[nodiscard]] Gpu WithModels(Gpu g, Models m) noexcept
@@ -129,7 +158,7 @@ struct Ready
     static constexpr auto WithNeuralRendering = [] [[nodiscard]] (const Gpu& gpu, const SessionPlan& plan, Created c) noexcept -> Result<Created, Error> {
         if (!plan.neuralRendering)
             return Created{ std::move(c.models), c.fence };
-        return BuiltNeuralRendering(gpu, plan, plan.tuning, std::move(c));
+        return BuiltNeuralRendering(gpu, plan, BuiltModel{ plan.tuning, plan.passes }, std::move(c));
     };
 
     static constexpr auto WithOpticalFlow = [] [[nodiscard]] (Gpu gpu, const SessionPlan& plan, interior::FenceValue fence) noexcept -> Result<Ready, Error> {
@@ -140,7 +169,7 @@ struct Ready
         return OpticalFlowFor(gpu, plan).transform([&](OpticalFlowSlot slot) { return Ready{ WithOpticalFlowSlot(std::move(gpu), std::move(slot)), fence }; });
     };
     return ClearedDepth(gpu, plan, interior::FenceValueTag::Parse(0))
-        .and_then([&](interior::FenceValue fence) { return WithSuperResolution(gpu, plan, Created{ Models{ std::move(runtime), std::nullopt, std::nullopt, std::nullopt }, fence }); })
+        .and_then([&](interior::FenceValue fence) { return WithSuperResolution(gpu, plan, Created{ Models{ std::move(runtime), std::nullopt, Passes{}, std::nullopt }, fence }); })
         .and_then([&](Created c) { return WithNeuralRendering(gpu, plan, std::move(c)); })
         .and_then([&](Created c) { return WithOpticalFlow(WithModels(std::move(gpu), std::move(c.models)), plan, c.fence); });
 }
@@ -599,14 +628,15 @@ std::optional<interior::CommandLine> RealEnvironment::Restart(const interior::Op
 
 Result<ExecutionReport, Error> RealEnvironment::Retuned(const interior::LiveSettings& controls) noexcept
 {
+    static constexpr auto Wanted = [] [[nodiscard]] (const interior::LiveSettings& controls) noexcept -> BuiltModel { return BuiltModel{ controls.tuning, controls.passes }; };
+
     static constexpr auto NeedsRebuild = [] [[nodiscard]] (const Models& models, const interior::LiveSettings& controls) noexcept -> bool {
-        static constexpr auto HasBuiltModel = [] [[nodiscard]] (const Models& models) noexcept -> bool { return models.neuralRendering.has_value(); };
-        return HasBuiltModel(models) && models.builtWith != controls.tuning;
+        return models.builtWith.has_value() && *models.builtWith != Wanted(controls);
     };
     if (!NeedsRebuild(gpu_.models, controls))
         return ExecutionReport{ frame_.fence, 0 };
     return WaitIdle(gpu_.device, frame_.fence)
-        .and_then([&](interior::FenceValue idle) { return BuiltNeuralRendering(gpu_, plan_, controls.tuning, Created{ std::move(gpu_.models), idle }); })
+        .and_then([&](interior::FenceValue idle) { return BuiltNeuralRendering(gpu_, plan_, Wanted(controls), Created{ std::move(gpu_.models), idle }); })
         .transform([this](Created rebuilt) {
             gpu_ = WithModels(std::move(gpu_), std::move(rebuilt.models)); // WAIVER(R2): the built model is effect-layer state, replaced whole when the operator retunes.
             frame_ = WithFence(frame_, rebuilt.fence);                     // WAIVER(R2): the last signalled fence, replaced whole.
@@ -733,6 +763,14 @@ Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional
                         return UavRequest(plan.work, model, L"DLSS 5 Neural Rendering output");
                     };
 
+                    // The two pictures the model's passes hand each other. Both exist whenever the model runs, so the
+                    // number of passes can change without the textures being rebuilt.
+                    static constexpr auto NrPassRequest = [] [[nodiscard]] (const SessionPlan& plan, DXGI_FORMAT model) noexcept -> std::optional<TextureRequest> {
+                        if (!plan.neuralRendering)
+                            return std::nullopt;
+                        return UavRequest(plan.work, model, L"DLSS 5 Neural Rendering pass");
+                    };
+
                     static constexpr auto OpticalFlowRequest = [] [[nodiscard]] (const SessionPlan& plan) noexcept -> std::optional<TextureRequest> {
                         static constexpr auto FlowOutputRequest = [] [[nodiscard]] (const SessionPlan& plan) noexcept -> TextureRequest {
                             return TextureRequest{ plan.flowExtent, DXGI_FORMAT_R16G16_SINT, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COMMON, L"Optical flow output" };
@@ -750,6 +788,8 @@ Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional
                     };
                     return WithOptionalTexture(t, d, SimpleId(ResourceKind::SrOutput), SrOutputRequest(plan, model))
                         .and_then([&](const ResourceTable& n) { return WithOptionalTexture(n, d, SimpleId(ResourceKind::NrOutput), NrOutputRequest(plan, model)); })
+                        .and_then([&](const ResourceTable& n) { return WithOptionalTexture(n, d, interior::NrPassId(*kZeroSet), NrPassRequest(plan, model)); })
+                        .and_then([&](const ResourceTable& n) { return WithOptionalTexture(n, d, interior::NrPassId(*kOneSet), NrPassRequest(plan, model)); })
                         .and_then([&](const ResourceTable& n) { return WithOptionalTexture(n, d, SimpleId(ResourceKind::OpticalFlowOutput), OpticalFlowRequest(plan)); });
                 };
 

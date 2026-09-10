@@ -15,6 +15,14 @@ template <class Range, class State, class E, class Step>
     return std::ranges::fold_left(range, initial, [&step](Result<State, E> acc, const auto& item) -> Result<State, E> { return acc.and_then([&](const State& state) { return step(state, item); }); });
 }
 
+// The same fold for a state that can only be moved: each step takes the state by value and hands it back.
+template <class Range, class State, class E, class Step>
+[[nodiscard]] constexpr Result<State, E> FoldOwned(const Range& range, Result<State, E> initial, Step step) noexcept
+{
+    return std::ranges::fold_left(range, std::move(initial),
+                                  [&step](Result<State, E> acc, const auto& item) -> Result<State, E> { return std::move(acc).and_then([&](State&& state) { return step(std::move(state), item); }); });
+}
+
 // Status fold: runs step on every item until the first error.
 template <class Range, class E, class Step>
 [[nodiscard]] constexpr Status<E> ForEach(const Range& range, Status<E> initial, Step step) noexcept

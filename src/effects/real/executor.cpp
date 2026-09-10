@@ -179,8 +179,9 @@ Result<interior::FenceValue, Error> ExecuteSteps(const Gpu& gpu, const FrameCont
 
         static constexpr auto RecordNeuralRendering = [] [[nodiscard]] (const Gpu& gpu, const interior::EvaluateNr& e, const Cursor& c) noexcept -> StepResult {
             REQUIRE(gpu.models.runtime.has_value());
-            REQUIRE(gpu.models.neuralRendering.has_value());
-            return EvaluateNeuralRendering(*gpu.models.runtime, *gpu.models.neuralRendering, gpu.list.Get(), e.tuning, e, gpu.resources).transform([&c] { return c; });
+            const Feature& feature = gpu.models.neuralRendering[e.pass.Get()];
+            REQUIRE(feature != nullptr);
+            return EvaluateNeuralRendering(*gpu.models.runtime, feature, gpu.list.Get(), e.tuning, e, gpu.resources).transform([&c] { return c; });
         };
 
         static constexpr auto RecordDraw = [] [[nodiscard]] (const Gpu& gpu, interior::FrameSlot slot, const interior::Draw& d, const Cursor& c) noexcept -> StepResult {

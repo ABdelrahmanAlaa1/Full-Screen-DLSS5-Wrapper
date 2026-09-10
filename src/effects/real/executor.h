@@ -25,14 +25,24 @@ struct OpticalFlowSlot
 };
 #endif
 
+// What the neural rendering instances were built with. The model reads its tuning when a feature is
+// built, not at evaluate, and the count decides how many there are, so a change to either means a rebuild.
+struct BuiltModel
+{
+    interior::NrTuning tuning;
+    interior::PassCount passes;
+    [[nodiscard]] friend constexpr bool operator==(const BuiltModel&, const BuiltModel&) noexcept = default;
+};
+
+// One instance of the model per pass, each with a history of its own, and nothing past the count built.
+using Passes = std::array<Feature, interior::kMaxPasses>;
+
 struct Models
 {
     std::optional<NgxRuntime> runtime;
     std::optional<Feature> superResolution;
-    std::optional<Feature> neuralRendering;
-    // The model reads its tuning when the feature is built, not at evaluate, so a changed value means a
-    // rebuild. This is what the current feature was built with.
-    std::optional<interior::NrTuning> builtWith;
+    Passes neuralRendering;
+    std::optional<BuiltModel> builtWith;
 };
 
 using Allocators = std::array<Com<ID3D12CommandAllocator>, interior::kFrameSlotCount>;
