@@ -41,6 +41,7 @@ constexpr int kColumnWidth = 384;
 constexpr int kColumns = 2;
 constexpr int kPanelWidth = kColumns * kColumnWidth + (kColumns + 1) * kMargin;
 constexpr int kSliderWidth = 196;
+constexpr int kWarningWidth = 26; // a glyph in front of a slider, which gives up that much of its length to it
 constexpr int kBoxOffset = 214;
 constexpr int kBoxWidth = 78;
 constexpr int kResetOffset = 312;
@@ -1348,8 +1349,12 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 };
 
                 static constexpr auto BuildFields = [] [[nodiscard]] (HWND parent, const Metrics& m, const std::array<float, kFieldCount>& values, Built built) noexcept -> Built {
+                    // A number with a warning wears the glyph in front of its slider, which starts after it and ends where it always did.
+                    static constexpr auto SliderInset = [] [[nodiscard]] (const FieldSpec& spec) noexcept -> int { return spec.warning == nullptr ? 0 : kWarningWidth; };
+
                     static constexpr auto CreateSlider = [] [[nodiscard]] (HWND parent, const Metrics& m, const FieldSpec& spec, const Placement& at, int steps) noexcept -> HWND {
-                        const HWND slider = CreateChild(parent, TRACKBAR_CLASSW, nullptr, TBS_HORZ | TBS_NOTICKS, 0, Bounds(m, at.left, at.control, kSliderWidth, m.ControlHeight()));
+                        const HWND slider = CreateChild(parent, TRACKBAR_CLASSW, nullptr, TBS_HORZ | TBS_NOTICKS, 0,
+                                                        Bounds(m, at.left + SliderInset(spec), at.control, kSliderWidth - SliderInset(spec), m.ControlHeight()));
                         if (slider == nullptr)
                             return nullptr;
                         (void)::SendMessageW(slider, TBM_SETRANGE, TRUE, MAKELPARAM(spec.minimum, spec.maximum));
@@ -1381,22 +1386,20 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         return ArrangedSpin(spin, box, spec, steps);
                     };
                     const auto steps = [&values](std::size_t f) { return StepsOf(values[f], kFields[f]); };
-                    // A label stops short of the end of its line when a glyph sits there: a later child sits under an earlier one.
-                    static constexpr auto LabelWidthOf = [] [[nodiscard]] (std::size_t f) noexcept -> int { return kFields[f].warning == nullptr ? kColumnWidth : kResetOffset - kMargin; };
                     built.labels = infra::Generated<HWND, kFieldCount>(
-                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, LabelWidthOf(f)); });
+                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, kColumnWidth); });
                     built.sliders = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateSlider(parent, m, kFields[f], PlaceOfRow(Kind::Field, f, m), steps(f)); });
                     built.boxes = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
                         return CreateChild(parent, WC_EDITW, L"", ES_LEFT | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, Bounds(m, at.left + kBoxOffset, at.control, kBoxWidth, m.ControlHeight()));
                     });
                     built.spins = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateSpin(parent, built.boxes[f], f, kFields[f], steps(f)); });
-                    // A number that wants a word of caution wears a glyph at the end of its label line; the hint says what for.
+                    // A number that wants a word of caution wears a glyph in front of its slider; the hint says what for.
                     static constexpr auto CreateWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t f) noexcept -> HWND {
                         if (kFields[f].warning == nullptr)
                             return nullptr;
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
-                        return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_NOTIFY, 0, Bounds(m, at.left + kResetOffset, at.top, kResetWidth, m.LabelHeight()));
+                        return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_CENTERIMAGE | SS_NOTIFY, 0, Bounds(m, at.left, at.control, kWarningWidth - 4, m.ControlHeight()));
                     };
                     built.resets = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
