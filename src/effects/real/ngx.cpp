@@ -35,39 +35,11 @@ constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + k
     return chars;
 }
 
-[[nodiscard]] bool HasModel(const interior::DirectoryPath& directory) noexcept
-{
-    return !directory.IsEmpty() && ::GetFileAttributesW(ModelPathIn(directory.Get()).data()) != INVALID_FILE_ATTRIBUTES;
-}
-
-[[nodiscard]] std::optional<interior::DirectoryPath> ModelIn(const interior::DirectoryPath& directory) noexcept
-{
-    if (!HasModel(directory))
-        return std::nullopt;
-    return directory;
-}
-
 [[nodiscard]] Status<Error> CheckNgx(NVSDK_NGX_Result result, ApiCall call) noexcept
 {
     if (NVSDK_NGX_FAILED(result))
         return Fail(Error{ call, static_cast<std::uint32_t>(result) });
     return {};
-}
-
-[[nodiscard]] Error FromCapacity(infra::CapacityExceeded) noexcept
-{
-    return Error{ ApiCall::NgxParameterList, 0 };
-}
-
-[[nodiscard]] NVSDK_NGX_Logging_Level LoggingLevelOf(interior::NgxLogLevel level) noexcept
-{
-    switch (level)
-    {
-    case interior::NgxLogLevel::Off: return NVSDK_NGX_LOGGING_LEVEL_OFF;
-    case interior::NgxLogLevel::On: return NVSDK_NGX_LOGGING_LEVEL_ON;
-    case interior::NgxLogLevel::Verbose: return NVSDK_NGX_LOGGING_LEVEL_VERBOSE;
-    }
-    return NVSDK_NGX_LOGGING_LEVEL_OFF;
 }
 
 [[nodiscard]] unsigned int PathCount(const NgxSettings& s) noexcept
@@ -77,65 +49,19 @@ constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + k
 
 [[nodiscard]] NVSDK_NGX_FeatureCommonInfo CommonInfoOf(const std::array<const wchar_t*, 2>& pointers, unsigned int count, interior::NgxLogLevel level) noexcept
 {
+    static constexpr auto LoggingLevelOf = [] [[nodiscard]] (interior::NgxLogLevel level) noexcept -> NVSDK_NGX_Logging_Level {
+        switch (level)
+        {
+        case interior::NgxLogLevel::Off: return NVSDK_NGX_LOGGING_LEVEL_OFF;
+        case interior::NgxLogLevel::On: return NVSDK_NGX_LOGGING_LEVEL_ON;
+        case interior::NgxLogLevel::Verbose: return NVSDK_NGX_LOGGING_LEVEL_VERBOSE;
+        }
+        return NVSDK_NGX_LOGGING_LEVEL_OFF;
+    };
     NVSDK_NGX_FeatureCommonInfo info{};
     info.PathListInfo = NVSDK_NGX_PathListInfo{ pointers.data(), count };
     info.LoggingInfo = NVSDK_NGX_LoggingInfo{ nullptr, LoggingLevelOf(level), false };
     return info;
-}
-
-[[nodiscard]] NVSDK_NGX_Application_Identifier AppIdentifier(interior::NgxAppId id) noexcept
-{
-    NVSDK_NGX_Application_Identifier identifier{};
-    identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Application_Id;
-    identifier.v.ApplicationId = id.Get();
-    return identifier;
-}
-
-[[nodiscard]] NVSDK_NGX_Application_Identifier ProjectIdentifier(const NgxSettings& s) noexcept
-{
-    NVSDK_NGX_Application_Identifier identifier{};
-    identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Project_Id;
-    identifier.v.ProjectDesc = NVSDK_NGX_ProjectIdDescription{ s.projectId.CString(), NVSDK_NGX_ENGINE_TYPE_CUSTOM, DSCREEN_VERSION_STRING };
-    return identifier;
-}
-
-[[nodiscard]] NVSDK_NGX_Application_Identifier IdentifierOf(const NgxSettings& s) noexcept
-{
-    return s.appId.has_value() ? AppIdentifier(*s.appId) : ProjectIdentifier(s);
-}
-
-[[nodiscard]] NVSDK_NGX_Result InitWithAppId(interior::NgxAppId id, const NgxSettings& s, ID3D12Device* device, const NVSDK_NGX_FeatureCommonInfo& common) noexcept
-{
-    return NVSDK_NGX_D3D12_Init(id.Get(), s.dataPath.CString(), device, &common, NVSDK_NGX_Version_API);
-}
-
-[[nodiscard]] NVSDK_NGX_Result InitWithProjectId(const NgxSettings& s, ID3D12Device* device, const NVSDK_NGX_FeatureCommonInfo& common) noexcept
-{
-    return NVSDK_NGX_D3D12_Init_with_ProjectID(s.projectId.CString(), NVSDK_NGX_ENGINE_TYPE_CUSTOM, DSCREEN_VERSION_STRING, s.dataPath.CString(), device, &common, NVSDK_NGX_Version_API);
-}
-
-[[nodiscard]] NVSDK_NGX_Result Init(const NgxSettings& s, ID3D12Device* device, const NVSDK_NGX_FeatureCommonInfo& common) noexcept
-{
-    return s.appId.has_value() ? InitWithAppId(*s.appId, s, device, common) : InitWithProjectId(s, device, common);
-}
-
-[[nodiscard]] Result<NgxParameters, Error> OwnedParameters(NVSDK_NGX_Parameter* raw) noexcept
-{
-    if (raw == nullptr)
-        return Fail(Error{ ApiCall::NgxGetCapabilityParameters, 0 });
-    return NgxParameters(raw);
-}
-
-[[nodiscard]] Result<NgxParameters, Error> CapabilityParameters() noexcept
-{
-    NVSDK_NGX_Parameter* raw = nullptr;
-    return CheckNgx(NVSDK_NGX_D3D12_GetCapabilityParameters(&raw), ApiCall::NgxGetCapabilityParameters).and_then([raw] { return OwnedParameters(raw); });
-}
-
-[[nodiscard]] Result<NgxRuntime, Error> Initialized(const GpuDevice& gpu, const std::shared_ptr<const NgxPaths>& paths) noexcept
-{
-    NgxSession session(gpu.device.Get());
-    return CapabilityParameters().transform([&](NgxParameters parameters) { return NgxRuntime{ paths, gpu.device, std::move(session), std::move(parameters) }; });
 }
 
 [[nodiscard]] std::optional<int> IntOf(const NVSDK_NGX_Parameter* p, const char* name) noexcept
@@ -154,19 +80,9 @@ constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + k
     return value;
 }
 
-[[nodiscard]] bool NeedsDriverUpdate(const NVSDK_NGX_Parameter* p) noexcept
-{
-    return IntOf(p, NVSDK_NGX_Parameter_SuperSampling_NeedsUpdatedDriver).value_or(0) != 0;
-}
-
 [[nodiscard]] bool IsSuperResolutionAvailable(const NVSDK_NGX_Parameter* p) noexcept
 {
     return IntOf(p, NVSDK_NGX_Parameter_SuperSampling_Available).value_or(0) != 0;
-}
-
-[[nodiscard]] bool IsCurrentDriver(const NVSDK_NGX_Parameter* p) noexcept
-{
-    return !NeedsDriverUpdate(p);
 }
 
 [[nodiscard]] NVSDK_NGX_PerfQuality_Value PerfQualityOf(interior::SrQuality quality) noexcept
@@ -195,14 +111,6 @@ struct OptimalSettings
     NVSDK_NGX_Result result;
 };
 
-[[nodiscard]] OptimalSettings Optimal(NVSDK_NGX_Parameter* p, const interior::Extent& target, NVSDK_NGX_PerfQuality_Value quality) noexcept
-{
-    OptimalSettings o{};
-    o.result =
-        NGX_DLSS_GET_OPTIMAL_SETTINGS(p, target.width.Get(), target.height.Get(), quality, &o.optimalWidth, &o.optimalHeight, &o.maxWidth, &o.maxHeight, &o.minWidth, &o.minHeight, &o.sharpness);
-    return o;
-}
-
 [[nodiscard]] std::optional<interior::Extent> ExtentOf(unsigned int width, unsigned int height) noexcept
 {
     return interior::PixelCountTag::Parse(width)
@@ -211,59 +119,27 @@ struct OptimalSettings
         .value_or(std::nullopt);
 }
 
-[[nodiscard]] std::optional<interior::QualityRange> RangeFrom(interior::SrQuality quality, const OptimalSettings& o) noexcept
-{
-    if (NVSDK_NGX_FAILED(o.result))
-        return std::nullopt;
-    return ExtentOf(o.optimalWidth, o.optimalHeight).and_then([&](const interior::Extent& optimal) {
-        return ExtentOf(o.minWidth, o.minHeight).and_then([&](const interior::Extent& minimum) {
-            return ExtentOf(o.maxWidth, o.maxHeight).transform([&](const interior::Extent& maximum) { return interior::QualityRange{ quality, optimal, minimum, maximum }; });
-        });
-    });
-}
-
-[[nodiscard]] interior::QualityTable WithRange(const interior::QualityTable& table, const std::optional<interior::QualityRange>& range) noexcept
-{
-    if (!range.has_value())
-        return table;
-    const Result<interior::QualityTable, infra::CapacityExceeded> pushed = table.Push(*range);
-    ENSURE(pushed.has_value());
-    return *pushed;
-}
-
-[[nodiscard]] const char* CName(interior::NrParameter parameter) noexcept
-{
-    const std::string_view name = interior::NameOf(parameter);
-    REQUIRE(name.data()[name.size()] == '\0');
-    return name.data();
-}
-
-void Write(NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexcept
-{
-    std::visit([p, name](auto v) { p->Set(name, v); }, value);
-}
-
-[[nodiscard]] bool ReadsBack(const NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexcept
-{
-    return std::visit(infra::Overloaded{
-                          [p, name](unsigned int v) {
-                              unsigned int back = 0;
-                              return !NVSDK_NGX_FAILED(p->Get(name, &back)) && back == v;
-                          },
-                          [p, name](float v) {
-                              float back = 0.0f;
-                              return !NVSDK_NGX_FAILED(p->Get(name, &back)) && back == v;
-                          },
-                          [p, name](ID3D12Resource* v) {
-                              ID3D12Resource* back = nullptr;
-                              return !NVSDK_NGX_FAILED(p->Get(name, &back)) && back == v;
-                          },
-                      },
-                      value);
-}
-
 [[nodiscard]] Status<Error> WriteVerified(NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexcept
 {
+    static constexpr auto Write = [](NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexcept -> void { std::visit([p, name](auto v) { p->Set(name, v); }, value); };
+
+    static constexpr auto ReadsBack = [] [[nodiscard]] (const NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexcept -> bool {
+        return std::visit(infra::Overloaded{
+                              [p, name](unsigned int v) {
+                                  unsigned int back = 0;
+                                  return !NVSDK_NGX_FAILED(p->Get(name, &back)) && back == v;
+                              },
+                              [p, name](float v) {
+                                  float back = 0.0f;
+                                  return !NVSDK_NGX_FAILED(p->Get(name, &back)) && back == v;
+                              },
+                              [p, name](ID3D12Resource* v) {
+                                  ID3D12Resource* back = nullptr;
+                                  return !NVSDK_NGX_FAILED(p->Get(name, &back)) && back == v;
+                              },
+                          },
+                          value);
+    };
     Write(p, name, value);
     if (!ReadsBack(p, name, value))
         return Fail(Error{ ApiCall::NgxParameterRoundTrip, static_cast<std::uint32_t>(value.index()) });
@@ -272,14 +148,12 @@ void Write(NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexc
 
 [[nodiscard]] Status<Error> WriteAll(NVSDK_NGX_Parameter* p, const BoundNrParameters& list) noexcept
 {
+    static constexpr auto CName = [] [[nodiscard]] (interior::NrParameter parameter) noexcept -> const char* {
+        const std::string_view name = interior::NameOf(parameter);
+        REQUIRE(name.data()[name.size()] == '\0');
+        return name.data();
+    };
     return infra::ForEach(list.Items(), Status<Error>{}, [p](const BoundNrParameter& b) { return WriteVerified(p, CName(b.name), b.value); });
-}
-
-[[nodiscard]] Status<Error> WritePresets(NVSDK_NGX_Parameter* p, interior::SrPreset preset) noexcept
-{
-    if (preset.Get() == 0)
-        return {};
-    return infra::ForEach(kPresetNames, Status<Error>{}, [p, preset](const char* name) { return WriteVerified(p, name, NgxSlot{ preset.Get() }); });
 }
 
 [[nodiscard]] Result<NgxSlot, Error> SlotOf(const interior::NgxValue& value, const ResourceTable& table) noexcept
@@ -292,70 +166,28 @@ void Write(NVSDK_NGX_Parameter* p, const char* name, const NgxSlot& value) noexc
                       value);
 }
 
-[[nodiscard]] Result<BoundNrParameters, Error> WithBound(const BoundNrParameters& acc, const interior::NrParameterValue& v, const ResourceTable& table) noexcept
-{
-    return SlotOf(v.value, table).and_then([&](const NgxSlot& slot) { return acc.Push(BoundNrParameter{ v.name, slot }).transform_error(FromCapacity); });
-}
-
-[[nodiscard]] int CreateFlagsOf(bool hdr) noexcept
-{
-    return hdr ? (NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_IsHDR) : NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
-}
-
-[[nodiscard]] NVSDK_NGX_DLSS_Create_Params CreateParamsOf(const interior::SrChoice& c) noexcept
-{
-    NVSDK_NGX_DLSS_Create_Params create{};
-    create.Feature = NVSDK_NGX_Feature_Create_Params{ c.input.width.Get(), c.input.height.Get(), c.output.width.Get(), c.output.height.Get(), PerfQualityOf(c.quality) };
-    create.InFeatureCreateFlags = CreateFlagsOf(c.hdr);
-    create.InEnableOutputSubrects = false;
-    return create;
-}
-
-[[nodiscard]] NVSDK_NGX_D3D12_DLSS_Eval_Params WithRender(NVSDK_NGX_D3D12_DLSS_Eval_Params eval, const SrInputs& in) noexcept
-{
-    eval.InRenderSubrectDimensions = NVSDK_NGX_Dimensions{ in.render.width.Get(), in.render.height.Get() };
-    eval.InReset = in.reset ? 1 : 0;
-    return eval;
-}
-
-[[nodiscard]] NVSDK_NGX_D3D12_DLSS_Eval_Params WithNeutralExposure(NVSDK_NGX_D3D12_DLSS_Eval_Params eval) noexcept
-{
-    eval.InMVScaleX = 1.0f;
-    eval.InMVScaleY = 1.0f;
-    eval.InPreExposure = 1.0f;
-    eval.InExposureScale = 1.0f;
-    return eval;
-}
-
-[[nodiscard]] NVSDK_NGX_D3D12_DLSS_Eval_Params EvalParamsOf(const SrInputs& in) noexcept
-{
-    NVSDK_NGX_D3D12_DLSS_Eval_Params eval{};
-    eval.Feature = NVSDK_NGX_D3D12_Feature_Eval_Params{ in.io.color, in.io.output, 0.0f };
-    eval.pInDepth = in.io.depth;
-    eval.pInMotionVectors = in.io.motionVectors;
-    return WithNeutralExposure(WithRender(eval, in));
-}
-
-[[nodiscard]] Result<Feature, Error> OwnedFeature(NVSDK_NGX_Handle* raw) noexcept
-{
-    if (raw == nullptr)
-        return Fail(Error{ ApiCall::NgxCreateFeature, 0 });
-    return Feature(raw);
-}
-
 [[nodiscard]] Result<Feature, Error> Created(NVSDK_NGX_Handle* raw, NVSDK_NGX_Result result) noexcept
 {
+    static constexpr auto OwnedFeature = [] [[nodiscard]] (NVSDK_NGX_Handle * raw) noexcept -> Result<Feature, Error> {
+        if (raw == nullptr)
+            return Fail(Error{ ApiCall::NgxCreateFeature, 0 });
+        return Feature(raw);
+    };
     return CheckNgx(result, ApiCall::NgxCreateFeature).and_then([raw] { return OwnedFeature(raw); });
-}
-
-[[nodiscard]] Result<BoundNrParameters, Error> Bound(const interior::NrParameterList& list, const ResourceTable& table) noexcept
-{
-    return infra::FoldResult(list.Items(), Result<BoundNrParameters, Error>(BoundNrParameters{}),
-                             [&table](const BoundNrParameters& acc, const interior::NrParameterValue& v) { return WithBound(acc, v, table); });
 }
 
 [[nodiscard]] Result<BoundNrParameters, Error> BoundOrFull(const Result<interior::NrParameterList, infra::CapacityExceeded>& list, const ResourceTable& table) noexcept
 {
+    static constexpr auto FromCapacity = [] [[nodiscard]] (infra::CapacityExceeded) noexcept -> Error { return Error{ ApiCall::NgxParameterList, 0 }; };
+
+    static constexpr auto Bound = [] [[nodiscard]] (const interior::NrParameterList& list, const ResourceTable& table) noexcept -> Result<BoundNrParameters, Error> {
+        static constexpr auto WithBound = [] [[nodiscard]] (const BoundNrParameters& acc, const interior::NrParameterValue& v,
+                                                            const ResourceTable& table) noexcept -> Result<BoundNrParameters, Error> {
+            return SlotOf(v.value, table).and_then([&](const NgxSlot& slot) { return acc.Push(BoundNrParameter{ v.name, slot }).transform_error(FromCapacity); });
+        };
+        return infra::FoldResult(list.Items(), Result<BoundNrParameters, Error>(BoundNrParameters{}),
+                                 [&table](const BoundNrParameters& acc, const interior::NrParameterValue& v) { return WithBound(acc, v, table); });
+    };
     return list.transform_error(FromCapacity).and_then([&table](const interior::NrParameterList& l) { return Bound(l, table); });
 }
 
@@ -384,6 +216,14 @@ void FeatureReleaser::operator()(NVSDK_NGX_Handle* handle) const noexcept
 
 std::optional<interior::DirectoryPath> NeuralRenderingModelLocation(const NgxSettings& settings) noexcept
 {
+    static constexpr auto ModelIn = [] [[nodiscard]] (const interior::DirectoryPath& directory) noexcept -> std::optional<interior::DirectoryPath> {
+        static constexpr auto HasModel = [] [[nodiscard]] (const interior::DirectoryPath& directory) noexcept -> bool {
+            return !directory.IsEmpty() && ::GetFileAttributesW(ModelPathIn(directory.Get()).data()) != INVALID_FILE_ATTRIBUTES;
+        };
+        if (!HasModel(directory))
+            return std::nullopt;
+        return directory;
+    };
     return ModelIn(settings.executableDirectory).or_else([&settings] { return ModelIn(settings.featurePath); });
 }
 
@@ -398,6 +238,22 @@ std::optional<interior::FilePath> NeuralRenderingModelFile(const NgxSettings& se
 
 Requirement RequirementOf(const GpuDevice& gpu, const NgxSettings& settings, NVSDK_NGX_Feature feature) noexcept
 {
+    static constexpr auto IdentifierOf = [] [[nodiscard]] (const NgxSettings& s) noexcept -> NVSDK_NGX_Application_Identifier {
+        static constexpr auto AppIdentifier = [] [[nodiscard]] (interior::NgxAppId id) noexcept -> NVSDK_NGX_Application_Identifier {
+            NVSDK_NGX_Application_Identifier identifier{};
+            identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Application_Id;
+            identifier.v.ApplicationId = id.Get();
+            return identifier;
+        };
+
+        static constexpr auto ProjectIdentifier = [] [[nodiscard]] (const NgxSettings& s) noexcept -> NVSDK_NGX_Application_Identifier {
+            NVSDK_NGX_Application_Identifier identifier{};
+            identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Project_Id;
+            identifier.v.ProjectDesc = NVSDK_NGX_ProjectIdDescription{ s.projectId.CString(), NVSDK_NGX_ENGINE_TYPE_CUSTOM, DSCREEN_VERSION_STRING };
+            return identifier;
+        };
+        return s.appId.has_value() ? AppIdentifier(*s.appId) : ProjectIdentifier(s);
+    };
     const NgxPaths paths{ settings };
     const NVSDK_NGX_FeatureDiscoveryInfo info{ NVSDK_NGX_Version_API, feature, IdentifierOf(settings), settings.dataPath.CString(), &paths.Common() };
     NVSDK_NGX_FeatureRequirement requirement{ static_cast<NVSDK_NGX_Feature_Support_Result>(0xFFFFFFFFu), 0, {} };
@@ -405,26 +261,49 @@ Requirement RequirementOf(const GpuDevice& gpu, const NgxSettings& settings, NVS
     return Requirement{ result, static_cast<std::uint32_t>(requirement.FeatureSupported) };
 }
 
-// The model draws its own overlay, naming its version, the preset it resolved and the sizes it is
-// working at, when this reads exactly 1024. It is read as the model loads, so it is asked for first.
-[[nodiscard]] Status<Error> RequestIndicator(bool wanted) noexcept
-{
-    if (!wanted)
-        return {};
-    return CheckBool(::SetEnvironmentVariableW(L"__NGX_SHOW_INDICATOR", L"1024"), ApiCall::SetEnvironmentVariable);
-}
-
-// The model keeps its compiled kernels between runs unless told not to, which is worth a look when a
-// kernel is suspected of being stale.
-[[nodiscard]] Status<Error> RequestKernelCache(bool wanted) noexcept
-{
-    if (wanted)
-        return {};
-    return CheckBool(::SetEnvironmentVariableW(L"__NGX_CUBIN_DISABLE_RESOURCE_CACHE", L"1"), ApiCall::SetEnvironmentVariable);
-}
-
 Result<NgxRuntime, Error> CreateNgxRuntime(const GpuDevice& gpu, const NgxSettings& settings) noexcept
 {
+    static constexpr auto Init = [] [[nodiscard]] (const NgxSettings& s, ID3D12Device* device, const NVSDK_NGX_FeatureCommonInfo& common) noexcept -> NVSDK_NGX_Result {
+        static constexpr auto InitWithAppId = [] [[nodiscard]] (interior::NgxAppId id, const NgxSettings& s, ID3D12Device* device,
+                                                                const NVSDK_NGX_FeatureCommonInfo& common) noexcept -> NVSDK_NGX_Result {
+            return NVSDK_NGX_D3D12_Init(id.Get(), s.dataPath.CString(), device, &common, NVSDK_NGX_Version_API);
+        };
+
+        static constexpr auto InitWithProjectId = [] [[nodiscard]] (const NgxSettings& s, ID3D12Device* device, const NVSDK_NGX_FeatureCommonInfo& common) noexcept -> NVSDK_NGX_Result {
+            return NVSDK_NGX_D3D12_Init_with_ProjectID(s.projectId.CString(), NVSDK_NGX_ENGINE_TYPE_CUSTOM, DSCREEN_VERSION_STRING, s.dataPath.CString(), device, &common, NVSDK_NGX_Version_API);
+        };
+        return s.appId.has_value() ? InitWithAppId(*s.appId, s, device, common) : InitWithProjectId(s, device, common);
+    };
+
+    static constexpr auto Initialized = [] [[nodiscard]] (const GpuDevice& gpu, const std::shared_ptr<const NgxPaths>& paths) noexcept -> Result<NgxRuntime, Error> {
+        static constexpr auto CapabilityParameters = [] [[nodiscard]] () noexcept -> Result<NgxParameters, Error> {
+            static constexpr auto OwnedParameters = [] [[nodiscard]] (NVSDK_NGX_Parameter * raw) noexcept -> Result<NgxParameters, Error> {
+                if (raw == nullptr)
+                    return Fail(Error{ ApiCall::NgxGetCapabilityParameters, 0 });
+                return NgxParameters(raw);
+            };
+            NVSDK_NGX_Parameter* raw = nullptr;
+            return CheckNgx(NVSDK_NGX_D3D12_GetCapabilityParameters(&raw), ApiCall::NgxGetCapabilityParameters).and_then([raw] { return OwnedParameters(raw); });
+        };
+        NgxSession session(gpu.device.Get());
+        return CapabilityParameters().transform([&](NgxParameters parameters) { return NgxRuntime{ paths, gpu.device, std::move(session), std::move(parameters) }; });
+    };
+
+    // The model draws its own overlay, naming its version, the preset it resolved and the sizes it is
+    // working at, when this reads exactly 1024. It is read as the model loads, so it is asked for first.
+    static constexpr auto RequestIndicator = [] [[nodiscard]] (bool wanted) noexcept -> Status<Error> {
+        if (!wanted)
+            return {};
+        return CheckBool(::SetEnvironmentVariableW(L"__NGX_SHOW_INDICATOR", L"1024"), ApiCall::SetEnvironmentVariable);
+    };
+
+    // The model keeps its compiled kernels between runs unless told not to, which is worth a look when a
+    // kernel is suspected of being stale.
+    static constexpr auto RequestKernelCache = [] [[nodiscard]] (bool wanted) noexcept -> Status<Error> {
+        if (wanted)
+            return {};
+        return CheckBool(::SetEnvironmentVariableW(L"__NGX_CUBIN_DISABLE_RESOURCE_CACHE", L"1"), ApiCall::SetEnvironmentVariable);
+    };
     const std::shared_ptr<const NgxPaths> paths = std::make_shared<const NgxPaths>(settings);
     return RequestIndicator(settings.indicator)
         .and_then([&] { return RequestKernelCache(settings.cubinCache); })
@@ -434,6 +313,12 @@ Result<NgxRuntime, Error> CreateNgxRuntime(const GpuDevice& gpu, const NgxSettin
 
 bool OffersSuperResolution(const NgxRuntime& runtime) noexcept
 {
+    static constexpr auto IsCurrentDriver = [] [[nodiscard]] (const NVSDK_NGX_Parameter* p) noexcept -> bool {
+        static constexpr auto NeedsDriverUpdate = [] [[nodiscard]] (const NVSDK_NGX_Parameter* p) noexcept -> bool {
+            return IntOf(p, NVSDK_NGX_Parameter_SuperSampling_NeedsUpdatedDriver).value_or(0) != 0;
+        };
+        return !NeedsDriverUpdate(p);
+    };
     return IsCurrentDriver(runtime.parameters.get()) && IsSuperResolutionAvailable(runtime.parameters.get());
 }
 
@@ -451,6 +336,30 @@ std::optional<std::uint32_t> NeuralRenderingPresetCount(const NgxRuntime& runtim
 
 interior::QualityTable QualityTableFor(const NgxRuntime& runtime, const interior::Extent& target) noexcept
 {
+    static constexpr auto Optimal = [] [[nodiscard]] (NVSDK_NGX_Parameter * p, const interior::Extent& target, NVSDK_NGX_PerfQuality_Value quality) noexcept -> OptimalSettings {
+        OptimalSettings o{};
+        o.result =
+            NGX_DLSS_GET_OPTIMAL_SETTINGS(p, target.width.Get(), target.height.Get(), quality, &o.optimalWidth, &o.optimalHeight, &o.maxWidth, &o.maxHeight, &o.minWidth, &o.minHeight, &o.sharpness);
+        return o;
+    };
+
+    static constexpr auto RangeFrom = [] [[nodiscard]] (interior::SrQuality quality, const OptimalSettings& o) noexcept -> std::optional<interior::QualityRange> {
+        if (NVSDK_NGX_FAILED(o.result))
+            return std::nullopt;
+        return ExtentOf(o.optimalWidth, o.optimalHeight).and_then([&](const interior::Extent& optimal) {
+            return ExtentOf(o.minWidth, o.minHeight).and_then([&](const interior::Extent& minimum) {
+                return ExtentOf(o.maxWidth, o.maxHeight).transform([&](const interior::Extent& maximum) { return interior::QualityRange{ quality, optimal, minimum, maximum }; });
+            });
+        });
+    };
+
+    static constexpr auto WithRange = [] [[nodiscard]] (const interior::QualityTable& table, const std::optional<interior::QualityRange>& range) noexcept -> interior::QualityTable {
+        if (!range.has_value())
+            return table;
+        const Result<interior::QualityTable, infra::CapacityExceeded> pushed = table.Push(*range);
+        ENSURE(pushed.has_value());
+        return *pushed;
+    };
     return std::ranges::fold_left(kQualities, interior::QualityTable{}, [&](const interior::QualityTable& acc, interior::SrQuality quality) {
         return WithRange(acc, RangeFrom(quality, Optimal(runtime.parameters.get(), target, PerfQualityOf(quality))));
     });
@@ -458,6 +367,22 @@ interior::QualityTable QualityTableFor(const NgxRuntime& runtime, const interior
 
 Result<Feature, Error> CreateSuperResolution(const NgxRuntime& runtime, ID3D12GraphicsCommandList* list, const interior::SrChoice& choice) noexcept
 {
+    static constexpr auto WritePresets = [] [[nodiscard]] (NVSDK_NGX_Parameter * p, interior::SrPreset preset) noexcept -> Status<Error> {
+        if (preset.Get() == 0)
+            return {};
+        return infra::ForEach(kPresetNames, Status<Error>{}, [p, preset](const char* name) { return WriteVerified(p, name, NgxSlot{ preset.Get() }); });
+    };
+
+    static constexpr auto CreateParamsOf = [] [[nodiscard]] (const interior::SrChoice& c) noexcept -> NVSDK_NGX_DLSS_Create_Params {
+        static constexpr auto CreateFlagsOf = [] [[nodiscard]] (bool hdr) noexcept -> int {
+            return hdr ? (NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_IsHDR) : NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+        };
+        NVSDK_NGX_DLSS_Create_Params create{};
+        create.Feature = NVSDK_NGX_Feature_Create_Params{ c.input.width.Get(), c.input.height.Get(), c.output.width.Get(), c.output.height.Get(), PerfQualityOf(c.quality) };
+        create.InFeatureCreateFlags = CreateFlagsOf(c.hdr);
+        create.InEnableOutputSubrects = false;
+        return create;
+    };
     NVSDK_NGX_DLSS_Create_Params create = CreateParamsOf(choice);
     NVSDK_NGX_Handle* raw = nullptr;
     return WritePresets(runtime.parameters.get(), choice.preset).and_then([&] { return Created(raw, NGX_D3D12_CREATE_DLSS_EXT(list, 1, 1, &raw, runtime.parameters.get(), &create)); });
@@ -473,6 +398,26 @@ Result<Feature, Error> CreateNeuralRendering(const NgxRuntime& runtime, ID3D12Gr
 
 Status<Error> EvaluateSuperResolution(const NgxRuntime& runtime, const Feature& feature, ID3D12GraphicsCommandList* list, const SrInputs& inputs) noexcept
 {
+    static constexpr auto EvalParamsOf = [] [[nodiscard]] (const SrInputs& in) noexcept -> NVSDK_NGX_D3D12_DLSS_Eval_Params {
+        static constexpr auto WithRender = [] [[nodiscard]] (NVSDK_NGX_D3D12_DLSS_Eval_Params eval, const SrInputs& in) noexcept -> NVSDK_NGX_D3D12_DLSS_Eval_Params {
+            eval.InRenderSubrectDimensions = NVSDK_NGX_Dimensions{ in.render.width.Get(), in.render.height.Get() };
+            eval.InReset = in.reset ? 1 : 0;
+            return eval;
+        };
+
+        static constexpr auto WithNeutralExposure = [] [[nodiscard]] (NVSDK_NGX_D3D12_DLSS_Eval_Params eval) noexcept -> NVSDK_NGX_D3D12_DLSS_Eval_Params {
+            eval.InMVScaleX = 1.0f;
+            eval.InMVScaleY = 1.0f;
+            eval.InPreExposure = 1.0f;
+            eval.InExposureScale = 1.0f;
+            return eval;
+        };
+        NVSDK_NGX_D3D12_DLSS_Eval_Params eval{};
+        eval.Feature = NVSDK_NGX_D3D12_Feature_Eval_Params{ in.io.color, in.io.output, 0.0f };
+        eval.pInDepth = in.io.depth;
+        eval.pInMotionVectors = in.io.motionVectors;
+        return WithNeutralExposure(WithRender(eval, in));
+    };
     NVSDK_NGX_D3D12_DLSS_Eval_Params eval = EvalParamsOf(inputs);
     return CheckNgx(NGX_D3D12_EVALUATE_DLSS_EXT(list, feature.get(), runtime.parameters.get(), &eval), ApiCall::NgxEvaluateFeature);
 }

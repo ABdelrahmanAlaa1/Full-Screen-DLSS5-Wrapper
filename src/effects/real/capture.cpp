@@ -35,7 +35,6 @@ constexpr DXGI_FORMAT kCanvasFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
 
 struct CopyRegion;
 struct Pending;
-[[nodiscard]] std::optional<CopyRegion> RegionFrom(const Capture& capture, const Pending& p, const D3D11_TEXTURE2D_DESC& desc, std::int32_t x, std::int32_t y) noexcept;
 
 // The fast-pass HSTRING points into the header, so both live only inside this call.
 [[nodiscard]] Status<Error> ActivationFactory(std::wstring_view className, REFIID iid, void** factory) noexcept
@@ -45,150 +44,6 @@ struct Pending;
     HSTRING string = nullptr;
     return Check(::WindowsCreateStringReference(className.data(), static_cast<UINT32>(className.size()), &header, &string), ApiCall::WindowsCreateStringReference).and_then([&] {
         return Check(::RoGetActivationFactory(string, iid, factory), ApiCall::RoGetActivationFactory);
-    });
-}
-
-[[nodiscard]] Result<Com<IGraphicsCaptureItemInterop>, Error> ItemInterop() noexcept
-{
-    Com<IGraphicsCaptureItemInterop> interop;
-    return ActivationFactory(kItemClass, IID_PPV_ARGS(&interop)).transform([&interop] { return interop; });
-}
-
-[[nodiscard]] Result<Com<WGC::IDirect3D11CaptureFramePoolStatics2>, Error> PoolStatics() noexcept
-{
-    Com<WGC::IDirect3D11CaptureFramePoolStatics2> statics;
-    return ActivationFactory(kPoolClass, IID_PPV_ARGS(&statics)).transform([&statics] { return statics; });
-}
-
-[[nodiscard]] Result<Com<WGC::IGraphicsCaptureSessionStatics>, Error> SessionStatics() noexcept
-{
-    Com<WGC::IGraphicsCaptureSessionStatics> statics;
-    return ActivationFactory(kSessionClass, IID_PPV_ARGS(&statics)).transform([&statics] { return statics; });
-}
-
-[[nodiscard]] Result<Com<ID3D11Device>, Error> CreateDevice11(const GpuDevice& gpu, Com<ID3D11DeviceContext>& context) noexcept
-{
-    Com<ID3D11Device> device;
-    const HRESULT hr = ::D3D11CreateDevice(gpu.adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context);
-    return Check(hr, ApiCall::D3D11CreateDevice).transform([&device] { return device; });
-}
-
-// The free-threaded pool uses the context from the capture service's thread, so it is protected.
-[[nodiscard]] Status<Error> ProtectContext(const Com<ID3D11DeviceContext>& context) noexcept
-{
-    return As<ID3D11Multithread>(context, ApiCall::QueryInterface).transform([](const Com<ID3D11Multithread>& multithread) { multithread->SetMultithreadProtected(TRUE); });
-}
-
-[[nodiscard]] Result<Com<WGD11::IDirect3DDevice>, Error> WinrtDeviceOf(const Com<ID3D11Device>& device11) noexcept
-{
-    return As<IDXGIDevice>(device11, ApiCall::QueryInterface).and_then([](const Com<IDXGIDevice>& dxgi) {
-        Com<IInspectable> inspectable;
-        const HRESULT hr = ::CreateDirect3D11DeviceFromDXGIDevice(dxgi.Get(), &inspectable);
-        return Check(hr, ApiCall::CreateDirect3D11DeviceFromDXGIDevice).and_then([&inspectable] { return As<WGD11::IDirect3DDevice>(inspectable, ApiCall::QueryInterface); });
-    });
-}
-
-[[nodiscard]] D3D11_TEXTURE2D_DESC CanvasDescription(const interior::Extent& extent) noexcept
-{
-    return D3D11_TEXTURE2D_DESC{ extent.width.Get(),
-                                 extent.height.Get(),
-                                 1,
-                                 1,
-                                 kCanvasFormat,
-                                 { 1, 0 },
-                                 D3D11_USAGE_DEFAULT,
-                                 D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
-                                 0,
-                                 D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE };
-}
-
-[[nodiscard]] Result<Com<ID3D11Texture2D>, Error> CreateCanvas(const Com<ID3D11Device>& device11, const interior::Extent& extent) noexcept
-{
-    const D3D11_TEXTURE2D_DESC desc = CanvasDescription(extent);
-    Com<ID3D11Texture2D> canvas;
-    return Check(device11->CreateTexture2D(&desc, nullptr, &canvas), ApiCall::CreateTexture2D).transform([&canvas] { return canvas; });
-}
-
-[[nodiscard]] Result<UniqueHandle, Error> ResourceHandle(const Com<ID3D11Texture2D>& canvas) noexcept
-{
-    return As<IDXGIResource1>(canvas, ApiCall::QueryInterface).and_then([](const Com<IDXGIResource1>& resource) -> Result<UniqueHandle, Error> {
-        HANDLE handle = nullptr;
-        const HRESULT hr = resource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &handle);
-        return Check(hr, ApiCall::CreateSharedHandle).transform([handle] { return UniqueHandle(handle); });
-    });
-}
-
-[[nodiscard]] Result<Com<ID3D11Fence>, Error> CreateSharedFence(const Com<ID3D11Device>& device11) noexcept
-{
-    return As<ID3D11Device5>(device11, ApiCall::QueryInterface).and_then([](const Com<ID3D11Device5>& device5) -> Result<Com<ID3D11Fence>, Error> {
-        Com<ID3D11Fence> fence;
-        return Check(device5->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(&fence)), ApiCall::D3D11CreateFence).transform([&fence] { return fence; });
-    });
-}
-
-[[nodiscard]] Result<UniqueHandle, Error> FenceHandle(const Com<ID3D11Fence>& fence) noexcept
-{
-    HANDLE handle = nullptr;
-    return Check(fence->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, &handle), ApiCall::CreateSharedHandle).transform([handle] { return UniqueHandle(handle); });
-}
-
-[[nodiscard]] Result<Com<ID3D12Resource>, Error> OpenedCanvas(const GpuDevice& gpu, const UniqueHandle& handle) noexcept
-{
-    Com<ID3D12Resource> opened;
-    return Check(gpu.device->OpenSharedHandle(handle.get(), IID_PPV_ARGS(&opened)), ApiCall::OpenSharedHandle).transform([&opened] { return opened; });
-}
-
-// WAIVER(R7): the same open over another interface; a template here would put metaprogramming outside infrastructure.
-[[nodiscard]] Result<Com<ID3D12Fence>, Error> OpenedFence(const GpuDevice& gpu, const UniqueHandle& handle) noexcept
-{
-    Com<ID3D12Fence> opened;
-    return Check(gpu.device->OpenSharedHandle(handle.get(), IID_PPV_ARGS(&opened)), ApiCall::OpenSharedHandle).transform([&opened] { return opened; });
-}
-
-// A window is asked for by its own handle, which gives its content whatever is in front of it, and follows
-// it as it moves. A monitor is asked for by monitor. Neither opens anything belonging to another process.
-[[nodiscard]] HRESULT ItemOf(const Com<IGraphicsCaptureItemInterop>& interop, const interior::MonitorInfo& source, Com<WGC::IGraphicsCaptureItem>& item) noexcept
-{
-    if (source.kind == interior::SourceKind::Window)
-        return interop->CreateForWindow(reinterpret_cast<HWND>(source.handle.Get()), IID_PPV_ARGS(&item));
-    return interop->CreateForMonitor(reinterpret_cast<HMONITOR>(source.handle.Get()), IID_PPV_ARGS(&item));
-}
-
-[[nodiscard]] Result<Com<WGC::IGraphicsCaptureItem>, Error> ItemFor(const interior::MonitorInfo& monitor) noexcept
-{
-    return ItemInterop().and_then([&monitor](const Com<IGraphicsCaptureItemInterop>& interop) {
-        Com<WGC::IGraphicsCaptureItem> item;
-        return Check(ItemOf(interop, monitor, item), ApiCall::CreateForMonitor).transform([&item] { return item; });
-    });
-}
-
-[[nodiscard]] Result<ABI::Windows::Graphics::SizeInt32, Error> SizeOf(WGC::IGraphicsCaptureItem* item) noexcept
-{
-    ABI::Windows::Graphics::SizeInt32 size{};
-    return Check(item->get_Size(&size), ApiCall::GetContentSize).transform([&size] { return size; });
-}
-
-[[nodiscard]] bool HasArea(ABI::Windows::Graphics::SizeInt32 size) noexcept
-{
-    return size.Width > 0 && size.Height > 0;
-}
-
-// A window that is closing answers with a size of nothing, and a pool of that size is refused with an
-// invalid argument. It is caught here so the session can fall back rather than fail with a dialog.
-[[nodiscard]] Result<Com<WGC::IDirect3D11CaptureFramePool>, Error> PoolOf(WGD11::IDirect3DDevice* device, WGC::IDirect3D11CaptureFramePoolStatics2* statics,
-                                                                          ABI::Windows::Graphics::SizeInt32 size) noexcept
-{
-    if (!HasArea(size))
-        return Fail(Error{ ApiCall::CreateFreeThreaded, 1 });
-    Com<WGC::IDirect3D11CaptureFramePool> pool;
-    const HRESULT hr = statics->CreateFreeThreaded(device, WGD::DirectXPixelFormat_B8G8R8A8UIntNormalized, kPoolBuffers, size, &pool);
-    return Check(hr, ApiCall::CreateFreeThreaded).transform([&pool] { return pool; });
-}
-
-[[nodiscard]] Result<Com<WGC::IDirect3D11CaptureFramePool>, Error> PoolFor(WGD11::IDirect3DDevice* device, WGC::IGraphicsCaptureItem* item) noexcept
-{
-    return PoolStatics().and_then([&](const Com<WGC::IDirect3D11CaptureFramePoolStatics2>& statics) {
-        return SizeOf(item).and_then([&](ABI::Windows::Graphics::SizeInt32 size) { return PoolOf(device, statics.Get(), size); });
     });
 }
 
@@ -214,48 +69,7 @@ struct Started
     bool excluding;
 };
 
-// The list is handed over twice, because a session that takes it while stopped need not be the one that
-// reads it while running. Either time sticking is enough for the windows to be uncovered.
-[[nodiscard]] bool ExcludedAgain(WGC::IGraphicsCaptureSession* session, std::span<const HWND> ours, bool before) noexcept
-{
-    NoteExclusionList(session, "--- after StartCapture");
-    const bool after = ExcludeWindowsFrom(session, ours);
-    return after || before;
-}
-
-[[nodiscard]] Result<Started, Error> SessionFor(WGC::IDirect3D11CaptureFramePool* pool, WGC::IGraphicsCaptureItem* item, const CaptureSettings& settings, std::span<const HWND> ours) noexcept
-{
-    Com<WGC::IGraphicsCaptureSession> session;
-    bool excluding = false; // WAIVER(R2): the answer of one call, read once after it.
-    return Check(pool->CreateCaptureSession(item, &session), ApiCall::CreateCaptureSession)
-        .and_then([&] { return ApplyCursor(session, settings.cursor); })
-        .and_then([&] { return ApplyBorder(session, settings.border); })
-        .and_then([&] {
-            excluding = ExcludeWindowsFrom(session.Get(), ours);
-            return Check(session->StartCapture(), ApiCall::StartCapture);
-        })
-        .transform([&] { return Started{ session, ExcludedAgain(session.Get(), ours, excluding) }; });
-}
-
-[[nodiscard]] Result<MonitorSession, Error> StartSession(WGD11::IDirect3DDevice* device, const interior::MonitorInfo& monitor, const CaptureSettings& settings, std::span<const HWND> ours) noexcept
-{
-    return ItemFor(monitor).and_then([&](const Com<WGC::IGraphicsCaptureItem>& item) {
-        return PoolFor(device, item.Get()).and_then([&](const Com<WGC::IDirect3D11CaptureFramePool>& pool) {
-            return SessionFor(pool.Get(), item.Get(), settings, ours).transform([&](const Started& started) { return MonitorSession{ item, pool, started.session, monitor, started.excluding }; });
-        });
-    });
-}
-
 using Sessions = infra::BoundedVector<MonitorSession, interior::kMaxMonitors>;
-
-[[nodiscard]] Result<Sessions, Error> StartAll(WGD11::IDirect3DDevice* device, const interior::MonitorList& monitors, const CaptureSettings& settings, std::span<const HWND> ours) noexcept
-{
-    return infra::FoldResult(monitors.Items(), Result<Sessions, Error>(Sessions{}), [&](const Sessions& acc, const interior::MonitorInfo& monitor) {
-        return StartSession(device, monitor, settings, ours).and_then([&acc](const MonitorSession& s) {
-            return acc.Push(s).transform_error([](infra::CapacityExceeded) { return Error{ ApiCall::CreateCaptureSession, 1 }; });
-        });
-    });
-}
 
 struct Devices
 {
@@ -263,16 +77,6 @@ struct Devices
     Com<ID3D11DeviceContext4> context;
     Com<WGD11::IDirect3DDevice> winrtDevice;
 };
-
-[[nodiscard]] Result<Devices, Error> CreateDevices(const GpuDevice& gpu) noexcept
-{
-    Com<ID3D11DeviceContext> context;
-    return CreateDevice11(gpu, context).and_then([&](const Com<ID3D11Device>& device11) {
-        return ProtectContext(context).and_then([&] { return As<ID3D11DeviceContext4>(context, ApiCall::QueryInterface); }).and_then([&](const Com<ID3D11DeviceContext4>& context4) {
-            return WinrtDeviceOf(device11).transform([&](const Com<WGD11::IDirect3DDevice>& winrt) { return Devices{ device11, context4, winrt }; });
-        });
-    });
-}
 
 // The objects both devices see. Each is created by the capture device and opened on the Direct3D 12 one.
 struct Bridge
@@ -291,36 +95,11 @@ struct SharedFence
     Com<ID3D12Fence> shared;
 };
 
-[[nodiscard]] Result<SharedFence, Error> SharedFenceFor(const Devices& d, const GpuDevice& gpu) noexcept
-{
-    return CreateSharedFence(d.device11).and_then([&](const Com<ID3D11Fence>& fence) {
-        return FenceHandle(fence).and_then(
-            [&](const UniqueHandle& handle) { return OpenedFence(gpu, handle).transform([&fence](const Com<ID3D12Fence>& shared) { return SharedFence{ fence, shared }; }); });
-    });
-}
-
 struct SharedCanvas
 {
     Com<ID3D11Texture2D> canvas;
     Com<ID3D12Resource> shared;
 };
-
-[[nodiscard]] Result<SharedCanvas, Error> SharedCanvasFor(const Devices& d, const GpuDevice& gpu, const interior::Extent& extent) noexcept
-{
-    return CreateCanvas(d.device11, extent).and_then([&](const Com<ID3D11Texture2D>& canvas) {
-        return ResourceHandle(canvas).and_then(
-            [&](const UniqueHandle& handle) { return OpenedCanvas(gpu, handle).transform([&canvas](const Com<ID3D12Resource>& shared) { return SharedCanvas{ canvas, shared }; }); });
-    });
-}
-
-[[nodiscard]] Result<Bridge, Error> CreateBridge(const Devices& d, const GpuDevice& gpu, const interior::Extent& extent) noexcept
-{
-    return SharedCanvasFor(d, gpu, extent).and_then([&](const SharedCanvas& canvas) {
-        return SharedFenceFor(d, gpu).and_then([&](const SharedFence& free) {
-            return SharedFenceFor(d, gpu).transform([&](const SharedFence& ready) { return Bridge{ canvas.canvas, canvas.shared, free.fence, free.shared, ready.fence, ready.shared }; });
-        });
-    });
-}
 
 // --- per-frame acquisition -------------------------------------------------------------------------
 
@@ -339,33 +118,6 @@ struct Drain
     });
 }
 
-[[nodiscard]] Result<Drain, Error> Replace(const Drain& d, const Com<WGC::IDirect3D11CaptureFrame>& next) noexcept
-{
-    return CloseFrame(d.latest).transform([&next] { return Drain{ next, false }; });
-}
-
-[[nodiscard]] Result<Drain, Error> Received(const Drain& d, const Com<WGC::IDirect3D11CaptureFrame>& next) noexcept
-{
-    if (!next)
-        return Drain{ d.latest, true };
-    return Replace(d, next);
-}
-
-[[nodiscard]] Result<Drain, Error> DrainOne(const Drain& d, WGC::IDirect3D11CaptureFramePool* pool) noexcept
-{
-    if (d.done)
-        return d;
-    Com<WGC::IDirect3D11CaptureFrame> next;
-    return Check(pool->TryGetNextFrame(&next), ApiCall::TryGetNextFrame).and_then([&] { return Received(d, next); });
-}
-
-[[nodiscard]] Result<Com<WGC::IDirect3D11CaptureFrame>, Error> LatestFrame(WGC::IDirect3D11CaptureFramePool* pool) noexcept
-{
-    return infra::FoldResult(std::views::iota(std::uint32_t{ 0 }, kMaxFramesDrained), Result<Drain, Error>(Drain{ nullptr, false }),
-                             [pool](const Drain& d, std::uint32_t) { return DrainOne(d, pool); })
-        .transform([](const Drain& d) { return d.latest; });
-}
-
 struct Pending
 {
     Com<WGC::IDirect3D11CaptureFrame> frame;
@@ -375,135 +127,12 @@ struct Pending
 
 using PendingList = infra::BoundedVector<Pending, interior::kMaxMonitors>;
 
-[[nodiscard]] Result<Com<ID3D11Texture2D>, Error> TextureOf(WGC::IDirect3D11CaptureFrame* frame) noexcept
-{
-    Com<WGD11::IDirect3DSurface> surface;
-    return Check(frame->get_Surface(&surface), ApiCall::GetSurface)
-        .and_then([&] { return As<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>(surface, ApiCall::GetInterface); })
-        .and_then([](const Com<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>& access) -> Result<Com<ID3D11Texture2D>, Error> {
-            Com<ID3D11Texture2D> texture;
-            return Check(access->GetInterface(IID_PPV_ARGS(&texture)), ApiCall::GetInterface).transform([&texture] { return texture; });
-        });
-}
-
-[[nodiscard]] Result<PendingList, Error> AppendPending(const PendingList& acc, const MonitorSession& session, const Com<WGC::IDirect3D11CaptureFrame>& frame) noexcept
-{
-    if (!frame)
-        return acc;
-    NoteFrameConfiguration(frame.Get());
-    return TextureOf(frame.Get()).and_then([&](const Com<ID3D11Texture2D>& texture) {
-        return acc.Push(Pending{ frame, texture, session.monitor }).transform_error([](infra::CapacityExceeded) { return Error{ ApiCall::TryGetNextFrame, 1 }; });
-    });
-}
-
-[[nodiscard]] Result<PendingList, Error> CollectPending(const Capture& capture) noexcept
-{
-    return infra::FoldResult(capture.sessions.Items(), Result<PendingList, Error>(PendingList{}), [](const PendingList& acc, const MonitorSession& session) {
-        return LatestFrame(session.pool.Get()).and_then([&](const Com<WGC::IDirect3D11CaptureFrame>& frame) { return AppendPending(acc, session, frame); });
-    });
-}
-
 struct CopyRegion
 {
     UINT x;
     UINT y;
     D3D11_BOX box;
 };
-
-[[nodiscard]] UINT ClampedSpan(std::uint32_t textureSpan, std::uint32_t monitorSpan, std::uint32_t available) noexcept
-{
-    return static_cast<UINT>(std::min(textureSpan, std::min(monitorSpan, available)));
-}
-
-[[nodiscard]] std::optional<CopyRegion> RegionOf(const Capture& capture, const Pending& p) noexcept
-{
-    D3D11_TEXTURE2D_DESC desc{};
-    p.texture->GetDesc(&desc);
-    const std::int32_t x = p.monitor.rect.Left().Get() - capture.canvasRect.Left().Get();
-    const std::int32_t y = p.monitor.rect.Top().Get() - capture.canvasRect.Top().Get();
-    return RegionFrom(capture, p, desc, x, y);
-}
-
-[[nodiscard]] bool IsOutsideCanvas(std::int32_t x, std::int32_t y) noexcept
-{
-    return x < 0 || y < 0;
-}
-
-[[nodiscard]] std::optional<CopyRegion> RegionFrom(const Capture& capture, const Pending& p, const D3D11_TEXTURE2D_DESC& desc, std::int32_t x, std::int32_t y) noexcept
-{
-    if (IsOutsideCanvas(x, y))
-        return std::nullopt;
-    const UINT w = ClampedSpan(desc.Width, static_cast<std::uint32_t>(p.monitor.rect.Right().Get() - p.monitor.rect.Left().Get()), capture.canvasExtent.width.Get() - static_cast<std::uint32_t>(x));
-    const UINT h = ClampedSpan(desc.Height, static_cast<std::uint32_t>(p.monitor.rect.Bottom().Get() - p.monitor.rect.Top().Get()), capture.canvasExtent.height.Get() - static_cast<std::uint32_t>(y));
-    return CopyRegion{ static_cast<UINT>(x), static_cast<UINT>(y), D3D11_BOX{ 0, 0, 0, w, h, 1 } };
-}
-
-void CopyOne(const Capture& capture, const Pending& p) noexcept
-{
-    const std::optional<CopyRegion> region = RegionOf(capture, p);
-    if (region.has_value())
-        capture.context->CopySubresourceRegion(capture.canvas.Get(), 0, region->x, region->y, 0, p.texture.Get(), 0, &region->box);
-}
-
-void CopyPending(const Capture& capture, const PendingList& pending) noexcept
-{
-    std::ranges::for_each(pending.Items(), [&capture](const Pending& p) { CopyOne(capture, p); });
-}
-
-// Ordering, entirely on the GPU: the queue signals that everything submitted so far has finished with the
-// canvas, the capture device waits for that before writing it, and the queue waits for the write to land.
-[[nodiscard]] Status<Error> ReleaseCanvas(const Capture& capture, interior::FenceValue value) noexcept
-{
-    return Check(capture.queue->Signal(capture.sharedCanvasFree.Get(), value.Get()), ApiCall::QueueSignal);
-}
-
-[[nodiscard]] Status<Error> AwaitCanvas(const Capture& capture, interior::FenceValue value) noexcept
-{
-    return Check(capture.context->Wait(capture.canvasFree.Get(), value.Get()), ApiCall::ContextWait);
-}
-
-[[nodiscard]] Status<Error> SignalCopied(const Capture& capture, interior::FenceValue value) noexcept
-{
-    const HRESULT hr = capture.context->Signal(capture.canvasReady.Get(), value.Get());
-    capture.context->Flush();
-    return Check(hr, ApiCall::ContextSignal);
-}
-
-[[nodiscard]] Status<Error> QueueAwaitsCopy(const Capture& capture, interior::FenceValue value) noexcept
-{
-    return Check(capture.queue->Wait(capture.sharedCanvasReady.Get(), value.Get()), ApiCall::QueueWait);
-}
-
-[[nodiscard]] Status<Error> CopiedAndSignalled(const Capture& capture, const PendingList& pending, interior::FenceValue value) noexcept
-{
-    CopyPending(capture, pending);
-    return SignalCopied(capture, value);
-}
-
-[[nodiscard]] Status<Error> CopyOrdered(const Capture& capture, const PendingList& pending, interior::FenceValue value) noexcept
-{
-    return ReleaseCanvas(capture, value).and_then([&] { return AwaitCanvas(capture, value); }).and_then([&] { return CopiedAndSignalled(capture, pending, value); }).and_then([&] {
-        return QueueAwaitsCopy(capture, value);
-    });
-}
-
-[[nodiscard]] Status<Error> CloseAll(const PendingList& pending) noexcept
-{
-    return infra::ForEach(pending.Items(), Status<Error>{}, [](const Pending& p) { return CloseFrame(p.frame); });
-}
-
-[[nodiscard]] Result<bool, Error> CopyAndClose(const Capture& capture, const PendingList& pending, interior::FenceValue value) noexcept
-{
-    if (pending.IsEmpty())
-        return false;
-    return CopyOrdered(capture, pending, value).and_then([&pending] { return CloseAll(pending); }).transform([] { return true; });
-}
-
-// One fence value per frame, never zero, so the values only ever rise.
-[[nodiscard]] interior::FenceValue ValueOf(interior::FrameNumber number) noexcept
-{
-    return interior::FenceValueTag::Parse(number.Get() + 1);
-}
 
 } // namespace
 
@@ -517,6 +146,10 @@ Status<Error> InitializeRuntime() noexcept
 
 Status<Error> RequireCaptureSupport() noexcept
 {
+    static constexpr auto SessionStatics = [] [[nodiscard]] () noexcept -> Result<Com<WGC::IGraphicsCaptureSessionStatics>, Error> {
+        Com<WGC::IGraphicsCaptureSessionStatics> statics;
+        return ActivationFactory(kSessionClass, IID_PPV_ARGS(&statics)).transform([&statics] { return statics; });
+    };
     return SessionStatics().and_then([](const Com<WGC::IGraphicsCaptureSessionStatics>& statics) -> Status<Error> {
         boolean supported = 0;
         return Check(statics->IsSupported(&supported), ApiCall::IsCaptureSupported).and_then([supported]() -> Status<Error> {
@@ -527,16 +160,195 @@ Status<Error> RequireCaptureSupport() noexcept
     });
 }
 
-// Our windows stay covered unless every session agreed to leave them out: one that did not would capture
-// them, and the model would be fed its own answer.
-[[nodiscard]] bool AllExcluding(const Sessions& sessions) noexcept
-{
-    return !sessions.IsEmpty() && std::ranges::all_of(sessions.Items(), [](const MonitorSession& s) { return s.excluding; });
-}
-
 Result<Capture, Error> CreateCapture(const GpuDevice& gpu, const interior::ScreenRect& canvasRect, const interior::Extent& canvasExtent, const interior::MonitorList& monitors,
                                      const CaptureSettings& settings, std::span<const HWND> ours) noexcept
 {
+    static constexpr auto StartAll = [] [[nodiscard]] (WGD11::IDirect3DDevice * device, const interior::MonitorList& monitors, const CaptureSettings& settings,
+                                                       std::span<const HWND> ours) noexcept -> Result<Sessions, Error> {
+        static constexpr auto StartSession = [] [[nodiscard]] (WGD11::IDirect3DDevice * device, const interior::MonitorInfo& monitor, const CaptureSettings& settings,
+                                                               std::span<const HWND> ours) noexcept -> Result<MonitorSession, Error> {
+            static constexpr auto ItemFor = [] [[nodiscard]] (const interior::MonitorInfo& monitor) noexcept -> Result<Com<WGC::IGraphicsCaptureItem>, Error> {
+                static constexpr auto ItemInterop = [] [[nodiscard]] () noexcept -> Result<Com<IGraphicsCaptureItemInterop>, Error> {
+                    Com<IGraphicsCaptureItemInterop> interop;
+                    return ActivationFactory(kItemClass, IID_PPV_ARGS(&interop)).transform([&interop] { return interop; });
+                };
+
+                // A window is asked for by its own handle, which gives its content whatever is in front of it, and follows
+                // it as it moves. A monitor is asked for by monitor. Neither opens anything belonging to another process.
+                static constexpr auto ItemOf = [] [[nodiscard]] (const Com<IGraphicsCaptureItemInterop>& interop, const interior::MonitorInfo& source,
+                                                                 Com<WGC::IGraphicsCaptureItem>& item) noexcept -> HRESULT {
+                    if (source.kind == interior::SourceKind::Window)
+                        return interop->CreateForWindow(reinterpret_cast<HWND>(source.handle.Get()), IID_PPV_ARGS(&item));
+                    return interop->CreateForMonitor(reinterpret_cast<HMONITOR>(source.handle.Get()), IID_PPV_ARGS(&item));
+                };
+                return ItemInterop().and_then([&monitor](const Com<IGraphicsCaptureItemInterop>& interop) {
+                    Com<WGC::IGraphicsCaptureItem> item;
+                    return Check(ItemOf(interop, monitor, item), ApiCall::CreateForMonitor).transform([&item] { return item; });
+                });
+            };
+
+            static constexpr auto PoolFor = [] [[nodiscard]] (WGD11::IDirect3DDevice * device, WGC::IGraphicsCaptureItem * item) noexcept -> Result<Com<WGC::IDirect3D11CaptureFramePool>, Error> {
+                static constexpr auto PoolStatics = [] [[nodiscard]] () noexcept -> Result<Com<WGC::IDirect3D11CaptureFramePoolStatics2>, Error> {
+                    Com<WGC::IDirect3D11CaptureFramePoolStatics2> statics;
+                    return ActivationFactory(kPoolClass, IID_PPV_ARGS(&statics)).transform([&statics] { return statics; });
+                };
+
+                static constexpr auto SizeOf = [] [[nodiscard]] (WGC::IGraphicsCaptureItem * item) noexcept -> Result<ABI::Windows::Graphics::SizeInt32, Error> {
+                    ABI::Windows::Graphics::SizeInt32 size{};
+                    return Check(item->get_Size(&size), ApiCall::GetContentSize).transform([&size] { return size; });
+                };
+
+                // A window that is closing answers with a size of nothing, and a pool of that size is refused with an
+                // invalid argument. It is caught here so the session can fall back rather than fail with a dialog.
+                static constexpr auto PoolOf = [] [[nodiscard]] (WGD11::IDirect3DDevice * device, WGC::IDirect3D11CaptureFramePoolStatics2 * statics,
+                                                                 ABI::Windows::Graphics::SizeInt32 size) noexcept -> Result<Com<WGC::IDirect3D11CaptureFramePool>, Error> {
+                    static constexpr auto HasArea = [] [[nodiscard]] (ABI::Windows::Graphics::SizeInt32 size) noexcept -> bool { return size.Width > 0 && size.Height > 0; };
+                    if (!HasArea(size))
+                        return Fail(Error{ ApiCall::CreateFreeThreaded, 1 });
+                    Com<WGC::IDirect3D11CaptureFramePool> pool;
+                    const HRESULT hr = statics->CreateFreeThreaded(device, WGD::DirectXPixelFormat_B8G8R8A8UIntNormalized, kPoolBuffers, size, &pool);
+                    return Check(hr, ApiCall::CreateFreeThreaded).transform([&pool] { return pool; });
+                };
+                return PoolStatics().and_then([&](const Com<WGC::IDirect3D11CaptureFramePoolStatics2>& statics) {
+                    return SizeOf(item).and_then([&](ABI::Windows::Graphics::SizeInt32 size) { return PoolOf(device, statics.Get(), size); });
+                });
+            };
+
+            static constexpr auto SessionFor = [] [[nodiscard]] (WGC::IDirect3D11CaptureFramePool * pool, WGC::IGraphicsCaptureItem * item, const CaptureSettings& settings,
+                                                                 std::span<const HWND> ours) noexcept -> Result<Started, Error> {
+                // The list is handed over twice, because a session that takes it while stopped need not be the one that
+                // reads it while running. Either time sticking is enough for the windows to be uncovered.
+                static constexpr auto ExcludedAgain = [] [[nodiscard]] (WGC::IGraphicsCaptureSession * session, std::span<const HWND> ours, bool before) noexcept -> bool {
+                    NoteExclusionList(session, "--- after StartCapture");
+                    const bool after = ExcludeWindowsFrom(session, ours);
+                    return after || before;
+                };
+                Com<WGC::IGraphicsCaptureSession> session;
+                bool excluding = false; // WAIVER(R2): the answer of one call, read once after it.
+                return Check(pool->CreateCaptureSession(item, &session), ApiCall::CreateCaptureSession)
+                    .and_then([&] { return ApplyCursor(session, settings.cursor); })
+                    .and_then([&] { return ApplyBorder(session, settings.border); })
+                    .and_then([&] {
+                        excluding = ExcludeWindowsFrom(session.Get(), ours);
+                        return Check(session->StartCapture(), ApiCall::StartCapture);
+                    })
+                    .transform([&] { return Started{ session, ExcludedAgain(session.Get(), ours, excluding) }; });
+            };
+            return ItemFor(monitor).and_then([&](const Com<WGC::IGraphicsCaptureItem>& item) {
+                return PoolFor(device, item.Get()).and_then([&](const Com<WGC::IDirect3D11CaptureFramePool>& pool) {
+                    return SessionFor(pool.Get(), item.Get(), settings, ours).transform([&](const Started& started) {
+                        return MonitorSession{ item, pool, started.session, monitor, started.excluding };
+                    });
+                });
+            });
+        };
+        return infra::FoldResult(monitors.Items(), Result<Sessions, Error>(Sessions{}), [&](const Sessions& acc, const interior::MonitorInfo& monitor) {
+            return StartSession(device, monitor, settings, ours).and_then([&acc](const MonitorSession& s) {
+                return acc.Push(s).transform_error([](infra::CapacityExceeded) { return Error{ ApiCall::CreateCaptureSession, 1 }; });
+            });
+        });
+    };
+
+    static constexpr auto CreateDevices = [] [[nodiscard]] (const GpuDevice& gpu) noexcept -> Result<Devices, Error> {
+        static constexpr auto CreateDevice11 = [] [[nodiscard]] (const GpuDevice& gpu, Com<ID3D11DeviceContext>& context) noexcept -> Result<Com<ID3D11Device>, Error> {
+            Com<ID3D11Device> device;
+            const HRESULT hr = ::D3D11CreateDevice(gpu.adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context);
+            return Check(hr, ApiCall::D3D11CreateDevice).transform([&device] { return device; });
+        };
+
+        // The free-threaded pool uses the context from the capture service's thread, so it is protected.
+        static constexpr auto ProtectContext = [] [[nodiscard]] (const Com<ID3D11DeviceContext>& context) noexcept -> Status<Error> {
+            return As<ID3D11Multithread>(context, ApiCall::QueryInterface).transform([](const Com<ID3D11Multithread>& multithread) { multithread->SetMultithreadProtected(TRUE); });
+        };
+
+        static constexpr auto WinrtDeviceOf = [] [[nodiscard]] (const Com<ID3D11Device>& device11) noexcept -> Result<Com<WGD11::IDirect3DDevice>, Error> {
+            return As<IDXGIDevice>(device11, ApiCall::QueryInterface).and_then([](const Com<IDXGIDevice>& dxgi) {
+                Com<IInspectable> inspectable;
+                const HRESULT hr = ::CreateDirect3D11DeviceFromDXGIDevice(dxgi.Get(), &inspectable);
+                return Check(hr, ApiCall::CreateDirect3D11DeviceFromDXGIDevice).and_then([&inspectable] { return As<WGD11::IDirect3DDevice>(inspectable, ApiCall::QueryInterface); });
+            });
+        };
+        Com<ID3D11DeviceContext> context;
+        return CreateDevice11(gpu, context).and_then([&](const Com<ID3D11Device>& device11) {
+            return ProtectContext(context).and_then([&] { return As<ID3D11DeviceContext4>(context, ApiCall::QueryInterface); }).and_then([&](const Com<ID3D11DeviceContext4>& context4) {
+                return WinrtDeviceOf(device11).transform([&](const Com<WGD11::IDirect3DDevice>& winrt) { return Devices{ device11, context4, winrt }; });
+            });
+        });
+    };
+
+    static constexpr auto CreateBridge = [] [[nodiscard]] (const Devices& d, const GpuDevice& gpu, const interior::Extent& extent) noexcept -> Result<Bridge, Error> {
+        static constexpr auto SharedFenceFor = [] [[nodiscard]] (const Devices& d, const GpuDevice& gpu) noexcept -> Result<SharedFence, Error> {
+            static constexpr auto CreateSharedFence = [] [[nodiscard]] (const Com<ID3D11Device>& device11) noexcept -> Result<Com<ID3D11Fence>, Error> {
+                return As<ID3D11Device5>(device11, ApiCall::QueryInterface).and_then([](const Com<ID3D11Device5>& device5) -> Result<Com<ID3D11Fence>, Error> {
+                    Com<ID3D11Fence> fence;
+                    return Check(device5->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(&fence)), ApiCall::D3D11CreateFence).transform([&fence] { return fence; });
+                });
+            };
+
+            static constexpr auto FenceHandle = [] [[nodiscard]] (const Com<ID3D11Fence>& fence) noexcept -> Result<UniqueHandle, Error> {
+                HANDLE handle = nullptr;
+                return Check(fence->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, &handle), ApiCall::CreateSharedHandle).transform([handle] { return UniqueHandle(handle); });
+            };
+
+            // WAIVER(R7): the same open over another interface; a template here would put metaprogramming outside infrastructure.
+            static constexpr auto OpenedFence = [] [[nodiscard]] (const GpuDevice& gpu, const UniqueHandle& handle) noexcept -> Result<Com<ID3D12Fence>, Error> {
+                Com<ID3D12Fence> opened;
+                return Check(gpu.device->OpenSharedHandle(handle.get(), IID_PPV_ARGS(&opened)), ApiCall::OpenSharedHandle).transform([&opened] { return opened; });
+            };
+            return CreateSharedFence(d.device11).and_then([&](const Com<ID3D11Fence>& fence) {
+                return FenceHandle(fence).and_then(
+                    [&](const UniqueHandle& handle) { return OpenedFence(gpu, handle).transform([&fence](const Com<ID3D12Fence>& shared) { return SharedFence{ fence, shared }; }); });
+            });
+        };
+
+        static constexpr auto SharedCanvasFor = [] [[nodiscard]] (const Devices& d, const GpuDevice& gpu, const interior::Extent& extent) noexcept -> Result<SharedCanvas, Error> {
+            static constexpr auto CreateCanvas = [] [[nodiscard]] (const Com<ID3D11Device>& device11, const interior::Extent& extent) noexcept -> Result<Com<ID3D11Texture2D>, Error> {
+                static constexpr auto CanvasDescription = [] [[nodiscard]] (const interior::Extent& extent) noexcept -> D3D11_TEXTURE2D_DESC {
+                    return D3D11_TEXTURE2D_DESC{ extent.width.Get(),
+                                                 extent.height.Get(),
+                                                 1,
+                                                 1,
+                                                 kCanvasFormat,
+                                                 { 1, 0 },
+                                                 D3D11_USAGE_DEFAULT,
+                                                 D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+                                                 0,
+                                                 D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE };
+                };
+                const D3D11_TEXTURE2D_DESC desc = CanvasDescription(extent);
+                Com<ID3D11Texture2D> canvas;
+                return Check(device11->CreateTexture2D(&desc, nullptr, &canvas), ApiCall::CreateTexture2D).transform([&canvas] { return canvas; });
+            };
+
+            static constexpr auto ResourceHandle = [] [[nodiscard]] (const Com<ID3D11Texture2D>& canvas) noexcept -> Result<UniqueHandle, Error> {
+                return As<IDXGIResource1>(canvas, ApiCall::QueryInterface).and_then([](const Com<IDXGIResource1>& resource) -> Result<UniqueHandle, Error> {
+                    HANDLE handle = nullptr;
+                    const HRESULT hr = resource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &handle);
+                    return Check(hr, ApiCall::CreateSharedHandle).transform([handle] { return UniqueHandle(handle); });
+                });
+            };
+
+            static constexpr auto OpenedCanvas = [] [[nodiscard]] (const GpuDevice& gpu, const UniqueHandle& handle) noexcept -> Result<Com<ID3D12Resource>, Error> {
+                Com<ID3D12Resource> opened;
+                return Check(gpu.device->OpenSharedHandle(handle.get(), IID_PPV_ARGS(&opened)), ApiCall::OpenSharedHandle).transform([&opened] { return opened; });
+            };
+            return CreateCanvas(d.device11, extent).and_then([&](const Com<ID3D11Texture2D>& canvas) {
+                return ResourceHandle(canvas).and_then(
+                    [&](const UniqueHandle& handle) { return OpenedCanvas(gpu, handle).transform([&canvas](const Com<ID3D12Resource>& shared) { return SharedCanvas{ canvas, shared }; }); });
+            });
+        };
+        return SharedCanvasFor(d, gpu, extent).and_then([&](const SharedCanvas& canvas) {
+            return SharedFenceFor(d, gpu).and_then([&](const SharedFence& free) {
+                return SharedFenceFor(d, gpu).transform([&](const SharedFence& ready) { return Bridge{ canvas.canvas, canvas.shared, free.fence, free.shared, ready.fence, ready.shared }; });
+            });
+        });
+    };
+
+    // Our windows stay covered unless every session agreed to leave them out: one that did not would capture
+    // them, and the model would be fed its own answer.
+    static constexpr auto AllExcluding = [] [[nodiscard]] (const Sessions& sessions) noexcept -> bool {
+        return !sessions.IsEmpty() && std::ranges::all_of(sessions.Items(), [](const MonitorSession& s) { return s.excluding; });
+    };
     return CreateDevices(gpu).and_then([&](const Devices& d) {
         return CreateBridge(d, gpu, canvasExtent).and_then([&](const Bridge& bridge) {
             return StartAll(d.winrtDevice.Get(), monitors, settings, ours).transform([&](const Sessions& sessions) {
@@ -555,6 +367,121 @@ Status<Error> ApplyCaptureSettings(const Capture& capture, const CaptureSettings
 
 Result<bool, Error> AcquireFrames(const Capture& capture, interior::FrameNumber number) noexcept
 {
+    static constexpr auto CollectPending = [] [[nodiscard]] (const Capture& capture) noexcept -> Result<PendingList, Error> {
+        static constexpr auto LatestFrame = [] [[nodiscard]] (WGC::IDirect3D11CaptureFramePool * pool) noexcept -> Result<Com<WGC::IDirect3D11CaptureFrame>, Error> {
+            static constexpr auto DrainOne = [] [[nodiscard]] (const Drain& d, WGC::IDirect3D11CaptureFramePool* pool) noexcept -> Result<Drain, Error> {
+                static constexpr auto Received = [] [[nodiscard]] (const Drain& d, const Com<WGC::IDirect3D11CaptureFrame>& next) noexcept -> Result<Drain, Error> {
+                    static constexpr auto Replace = [] [[nodiscard]] (const Drain& d, const Com<WGC::IDirect3D11CaptureFrame>& next) noexcept -> Result<Drain, Error> {
+                        return CloseFrame(d.latest).transform([&next] { return Drain{ next, false }; });
+                    };
+                    if (!next)
+                        return Drain{ d.latest, true };
+                    return Replace(d, next);
+                };
+                if (d.done)
+                    return d;
+                Com<WGC::IDirect3D11CaptureFrame> next;
+                return Check(pool->TryGetNextFrame(&next), ApiCall::TryGetNextFrame).and_then([&] { return Received(d, next); });
+            };
+            return infra::FoldResult(std::views::iota(std::uint32_t{ 0 }, kMaxFramesDrained), Result<Drain, Error>(Drain{ nullptr, false }),
+                                     [pool](const Drain& d, std::uint32_t) { return DrainOne(d, pool); })
+                .transform([](const Drain& d) { return d.latest; });
+        };
+
+        static constexpr auto AppendPending = [] [[nodiscard]] (const PendingList& acc, const MonitorSession& session,
+                                                                const Com<WGC::IDirect3D11CaptureFrame>& frame) noexcept -> Result<PendingList, Error> {
+            static constexpr auto TextureOf = [] [[nodiscard]] (WGC::IDirect3D11CaptureFrame * frame) noexcept -> Result<Com<ID3D11Texture2D>, Error> {
+                Com<WGD11::IDirect3DSurface> surface;
+                return Check(frame->get_Surface(&surface), ApiCall::GetSurface)
+                    .and_then([&] { return As<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>(surface, ApiCall::GetInterface); })
+                    .and_then([](const Com<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>& access) -> Result<Com<ID3D11Texture2D>, Error> {
+                        Com<ID3D11Texture2D> texture;
+                        return Check(access->GetInterface(IID_PPV_ARGS(&texture)), ApiCall::GetInterface).transform([&texture] { return texture; });
+                    });
+            };
+            if (!frame)
+                return acc;
+            NoteFrameConfiguration(frame.Get());
+            return TextureOf(frame.Get()).and_then([&](const Com<ID3D11Texture2D>& texture) {
+                return acc.Push(Pending{ frame, texture, session.monitor }).transform_error([](infra::CapacityExceeded) { return Error{ ApiCall::TryGetNextFrame, 1 }; });
+            });
+        };
+        return infra::FoldResult(capture.sessions.Items(), Result<PendingList, Error>(PendingList{}), [](const PendingList& acc, const MonitorSession& session) {
+            return LatestFrame(session.pool.Get()).and_then([&](const Com<WGC::IDirect3D11CaptureFrame>& frame) { return AppendPending(acc, session, frame); });
+        });
+    };
+
+    static constexpr auto CopyAndClose = [] [[nodiscard]] (const Capture& capture, const PendingList& pending, interior::FenceValue value) noexcept -> Result<bool, Error> {
+        static constexpr auto CopyOrdered = [] [[nodiscard]] (const Capture& capture, const PendingList& pending, interior::FenceValue value) noexcept -> Status<Error> {
+            // Ordering, entirely on the GPU: the queue signals that everything submitted so far has finished with the
+            // canvas, the capture device waits for that before writing it, and the queue waits for the write to land.
+            static constexpr auto ReleaseCanvas = [] [[nodiscard]] (const Capture& capture, interior::FenceValue value) noexcept -> Status<Error> {
+                return Check(capture.queue->Signal(capture.sharedCanvasFree.Get(), value.Get()), ApiCall::QueueSignal);
+            };
+
+            static constexpr auto AwaitCanvas = [] [[nodiscard]] (const Capture& capture, interior::FenceValue value) noexcept -> Status<Error> {
+                return Check(capture.context->Wait(capture.canvasFree.Get(), value.Get()), ApiCall::ContextWait);
+            };
+
+            static constexpr auto QueueAwaitsCopy = [] [[nodiscard]] (const Capture& capture, interior::FenceValue value) noexcept -> Status<Error> {
+                return Check(capture.queue->Wait(capture.sharedCanvasReady.Get(), value.Get()), ApiCall::QueueWait);
+            };
+
+            static constexpr auto CopiedAndSignalled = [] [[nodiscard]] (const Capture& capture, const PendingList& pending, interior::FenceValue value) noexcept -> Status<Error> {
+                static constexpr auto CopyPending = [](const Capture& capture, const PendingList& pending) noexcept -> void {
+                    static constexpr auto CopyOne = [](const Capture& capture, const Pending& p) noexcept -> void {
+                        static constexpr auto RegionOf = [] [[nodiscard]] (const Capture& capture, const Pending& p) noexcept -> std::optional<CopyRegion> {
+                            static constexpr auto RegionFrom = [] [[nodiscard]] (const Capture& capture, const Pending& p, const D3D11_TEXTURE2D_DESC& desc, std::int32_t x,
+                                                                                 std::int32_t y) noexcept -> std::optional<CopyRegion> {
+                                static constexpr auto ClampedSpan = [] [[nodiscard]] (std::uint32_t textureSpan, std::uint32_t monitorSpan, std::uint32_t available) noexcept -> UINT {
+                                    return static_cast<UINT>(std::min(textureSpan, std::min(monitorSpan, available)));
+                                };
+
+                                static constexpr auto IsOutsideCanvas = [] [[nodiscard]] (std::int32_t x, std::int32_t y) noexcept -> bool { return x < 0 || y < 0; };
+                                if (IsOutsideCanvas(x, y))
+                                    return std::nullopt;
+                                const UINT w = ClampedSpan(desc.Width, static_cast<std::uint32_t>(p.monitor.rect.Right().Get() - p.monitor.rect.Left().Get()),
+                                                           capture.canvasExtent.width.Get() - static_cast<std::uint32_t>(x));
+                                const UINT h = ClampedSpan(desc.Height, static_cast<std::uint32_t>(p.monitor.rect.Bottom().Get() - p.monitor.rect.Top().Get()),
+                                                           capture.canvasExtent.height.Get() - static_cast<std::uint32_t>(y));
+                                return CopyRegion{ static_cast<UINT>(x), static_cast<UINT>(y), D3D11_BOX{ 0, 0, 0, w, h, 1 } };
+                            };
+                            D3D11_TEXTURE2D_DESC desc{};
+                            p.texture->GetDesc(&desc);
+                            const std::int32_t x = p.monitor.rect.Left().Get() - capture.canvasRect.Left().Get();
+                            const std::int32_t y = p.monitor.rect.Top().Get() - capture.canvasRect.Top().Get();
+                            return RegionFrom(capture, p, desc, x, y);
+                        };
+                        const std::optional<CopyRegion> region = RegionOf(capture, p);
+                        if (region.has_value())
+                            capture.context->CopySubresourceRegion(capture.canvas.Get(), 0, region->x, region->y, 0, p.texture.Get(), 0, &region->box);
+                    };
+                    std::ranges::for_each(pending.Items(), [&capture](const Pending& p) { CopyOne(capture, p); });
+                };
+
+                static constexpr auto SignalCopied = [] [[nodiscard]] (const Capture& capture, interior::FenceValue value) noexcept -> Status<Error> {
+                    const HRESULT hr = capture.context->Signal(capture.canvasReady.Get(), value.Get());
+                    capture.context->Flush();
+                    return Check(hr, ApiCall::ContextSignal);
+                };
+                CopyPending(capture, pending);
+                return SignalCopied(capture, value);
+            };
+            return ReleaseCanvas(capture, value).and_then([&] { return AwaitCanvas(capture, value); }).and_then([&] { return CopiedAndSignalled(capture, pending, value); }).and_then([&] {
+                return QueueAwaitsCopy(capture, value);
+            });
+        };
+
+        static constexpr auto CloseAll = [] [[nodiscard]] (const PendingList& pending) noexcept -> Status<Error> {
+            return infra::ForEach(pending.Items(), Status<Error>{}, [](const Pending& p) { return CloseFrame(p.frame); });
+        };
+        if (pending.IsEmpty())
+            return false;
+        return CopyOrdered(capture, pending, value).and_then([&pending] { return CloseAll(pending); }).transform([] { return true; });
+    };
+
+    // One fence value per frame, never zero, so the values only ever rise.
+    static constexpr auto ValueOf = [] [[nodiscard]] (interior::FrameNumber number) noexcept -> interior::FenceValue { return interior::FenceValueTag::Parse(number.Get() + 1); };
     return CollectPending(capture).and_then([&](const PendingList& pending) { return CopyAndClose(capture, pending, ValueOf(number)); });
 }
 

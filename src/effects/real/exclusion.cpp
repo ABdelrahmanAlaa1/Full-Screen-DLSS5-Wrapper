@@ -19,15 +19,13 @@ using ABI::Windows::UI::WindowId;
 // Every step is written to a file of its own: it fails in a way that reads as success.
 constexpr wchar_t kNotesFile[] = L"dlssscreen-exclusion.log";
 
-[[nodiscard]] HANDLE Notes() noexcept
-{
-    // WAIVER(R11): one file for the program, opened once and left open until it ends.
-    static const HANDLE file = ::CreateFileW(kNotesFile, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    return file;
-}
-
 void Note(std::string_view line) noexcept
 {
+    static constexpr auto Notes = [] [[nodiscard]] () noexcept -> HANDLE {
+        // WAIVER(R11): one file for the program, opened once and left open until it ends.
+        static const HANDLE file = ::CreateFileW(kNotesFile, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        return file;
+    };
     if (Notes() == INVALID_HANDLE_VALUE)
         return;
     DWORD written = 0; // WAIVER(R2): what the write reports, which nothing reads.
@@ -96,26 +94,19 @@ struct IFrameConfiguration : IInspectable
     virtual HRESULT STDMETHODCALLTYPE get_ConfigurationIteration(UINT64* value) noexcept = 0;
 };
 
-// An interface we did not think of is the likeliest way a computed identity is wrong, and Windows asking
-// for one it cannot get is invisible from the outside, so every refusal says what was asked for.
-[[nodiscard]] HRESULT NotedRefusal(REFIID asked) noexcept
-{
-    NoteTwo("refused an interface", asked.Data1, asked.Data2);
-    return E_NOINTERFACE;
-}
-
-[[nodiscard]] bool IsOwnOrUnknown(REFIID asked, const GUID& own) noexcept
-{
-    return ::IsEqualGUID(asked, own) || ::IsEqualGUID(asked, IID_IUnknown);
-}
-
-[[nodiscard]] bool Knows(REFIID asked, const GUID& own) noexcept
-{
-    return IsOwnOrUnknown(asked, own) || ::IsEqualGUID(asked, IID_IInspectable);
-}
-
 [[nodiscard]] HRESULT Answer(REFIID asked, const GUID& own, IUnknown* self, void** out) noexcept
 {
+    // An interface we did not think of is the likeliest way a computed identity is wrong, and Windows asking
+    // for one it cannot get is invisible from the outside, so every refusal says what was asked for.
+    static constexpr auto NotedRefusal = [] [[nodiscard]] (REFIID asked) noexcept -> HRESULT {
+        NoteTwo("refused an interface", asked.Data1, asked.Data2);
+        return E_NOINTERFACE;
+    };
+
+    static constexpr auto Knows = [] [[nodiscard]] (REFIID asked, const GUID& own) noexcept -> bool {
+        static constexpr auto IsOwnOrUnknown = [] [[nodiscard]] (REFIID asked, const GUID& own) noexcept -> bool { return ::IsEqualGUID(asked, own) || ::IsEqualGUID(asked, IID_IUnknown); };
+        return IsOwnOrUnknown(asked, own) || ::IsEqualGUID(asked, IID_IInspectable);
+    };
     if (!Knows(asked, own))
         return NotedRefusal(asked);
     *out = self;
@@ -271,82 +262,62 @@ struct Interop
     WindowOfWindowId toWindow;
 };
 
-[[nodiscard]] Interop ResolvedIn(HMODULE library) noexcept
-{
-    return Interop{ .toId = reinterpret_cast<WindowIdOfWindow>(reinterpret_cast<void*>(::GetProcAddress(library, "GetWindowIdFromWindow"))),
-                    .toWindow = reinterpret_cast<WindowOfWindowId>(reinterpret_cast<void*>(::GetProcAddress(library, "GetWindowFromWindowId"))) };
-}
-
-[[nodiscard]] Interop Noted(const Interop& found) noexcept
-{
-    NoteTwo("GetWindowIdFromWindow / GetWindowFromWindowId", reinterpret_cast<std::uintptr_t>(found.toId), reinterpret_cast<std::uintptr_t>(found.toWindow));
-    return found;
-}
-
-[[nodiscard]] Interop Resolved() noexcept
-{
-    const HMODULE library = ::LoadLibraryExW(kWindowingSet, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    NoteOne("apiset loaded", reinterpret_cast<std::uintptr_t>(library));
-    if (library == nullptr)
-        return Interop{ .toId = nullptr, .toWindow = nullptr };
-    return Noted(ResolvedIn(library));
-}
-
-[[nodiscard]] const Interop& TheInterop() noexcept
-{
-    // WAIVER(R11): resolved once for the program, from a library that is never let go of again.
-    static const Interop interop = Resolved();
-    return interop;
-}
-
-// An id is only believed when Windows turns it back into the window it was made from. An id that means
-// nothing would go into the list, read back out of it, and be taken for success.
-[[nodiscard]] bool NamesTheWindow(const Interop& interop, WindowId id, HWND window) noexcept
-{
-    HWND back = nullptr;
-    const HRESULT hr = interop.toWindow(id, &back);
-    NoteTwo("id back to window: hwnd, came back as", reinterpret_cast<std::uintptr_t>(window), reinterpret_cast<std::uintptr_t>(back));
-    if (FAILED(hr))
-        return false;
-    return back == window;
-}
-
-[[nodiscard]] std::optional<WindowId> CheckedAgainst(const Interop& interop, WindowId id, HWND window) noexcept
-{
-    return NamesTheWindow(interop, id, window) ? std::optional<WindowId>{ id } : std::nullopt;
-}
-
-[[nodiscard]] std::optional<WindowId> ConvertedBy(const Interop& interop, HWND window) noexcept
-{
-    WindowId id{};
-    const HRESULT hr = interop.toId(window, &id);
-    NoteTwo("window to id: hr, id", static_cast<unsigned long>(hr), id.Value);
-    if (FAILED(hr))
-        return std::nullopt;
-    return CheckedAgainst(interop, id, window);
-}
-
-[[nodiscard]] bool HasBoth(const Interop& interop) noexcept
-{
-    return interop.toId != nullptr && interop.toWindow != nullptr;
-}
-
-[[nodiscard]] std::optional<WindowId> IdOf(HWND window) noexcept
-{
-    if (!HasBoth(TheInterop()))
-        return std::nullopt;
-    return ConvertedBy(TheInterop(), window);
-}
-
-[[nodiscard]] bool IsThere(const std::optional<WindowId>& id) noexcept
-{
-    return id.has_value();
-}
-
 // All of them or none: a list missing one of our windows would leave that one in the capture, and the
 // windows are uncovered on the strength of the list being complete.
 [[nodiscard]] std::size_t Filled(WindowIds& ids, std::span<const HWND> windows) noexcept
 {
+    static constexpr auto IdOf = [] [[nodiscard]] (HWND window) noexcept -> std::optional<WindowId> {
+        static constexpr auto TheInterop = [] [[nodiscard]] () noexcept -> const Interop& {
+            static constexpr auto Resolved = [] [[nodiscard]] () noexcept -> Interop {
+                static constexpr auto ResolvedIn = [] [[nodiscard]] (HMODULE library) noexcept -> Interop {
+                    return Interop{ .toId = reinterpret_cast<WindowIdOfWindow>(reinterpret_cast<void*>(::GetProcAddress(library, "GetWindowIdFromWindow"))),
+                                    .toWindow = reinterpret_cast<WindowOfWindowId>(reinterpret_cast<void*>(::GetProcAddress(library, "GetWindowFromWindowId"))) };
+                };
+
+                static constexpr auto Noted = [] [[nodiscard]] (const Interop& found) noexcept -> Interop {
+                    NoteTwo("GetWindowIdFromWindow / GetWindowFromWindowId", reinterpret_cast<std::uintptr_t>(found.toId), reinterpret_cast<std::uintptr_t>(found.toWindow));
+                    return found;
+                };
+                const HMODULE library = ::LoadLibraryExW(kWindowingSet, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+                NoteOne("apiset loaded", reinterpret_cast<std::uintptr_t>(library));
+                if (library == nullptr)
+                    return Interop{ .toId = nullptr, .toWindow = nullptr };
+                return Noted(ResolvedIn(library));
+            };
+            // WAIVER(R11): resolved once for the program, from a library that is never let go of again.
+            static const Interop interop = Resolved();
+            return interop;
+        };
+
+        static constexpr auto ConvertedBy = [] [[nodiscard]] (const Interop& interop, HWND window) noexcept -> std::optional<WindowId> {
+            static constexpr auto CheckedAgainst = [] [[nodiscard]] (const Interop& interop, WindowId id, HWND window) noexcept -> std::optional<WindowId> {
+                // An id is only believed when Windows turns it back into the window it was made from. An id that means
+                // nothing would go into the list, read back out of it, and be taken for success.
+                static constexpr auto NamesTheWindow = [] [[nodiscard]] (const Interop& interop, WindowId id, HWND window) noexcept -> bool {
+                    HWND back = nullptr;
+                    const HRESULT hr = interop.toWindow(id, &back);
+                    NoteTwo("id back to window: hwnd, came back as", reinterpret_cast<std::uintptr_t>(window), reinterpret_cast<std::uintptr_t>(back));
+                    if (FAILED(hr))
+                        return false;
+                    return back == window;
+                };
+                return NamesTheWindow(interop, id, window) ? std::optional<WindowId>{ id } : std::nullopt;
+            };
+            WindowId id{};
+            const HRESULT hr = interop.toId(window, &id);
+            NoteTwo("window to id: hr, id", static_cast<unsigned long>(hr), id.Value);
+            if (FAILED(hr))
+                return std::nullopt;
+            return CheckedAgainst(interop, id, window);
+        };
+
+        static constexpr auto HasBoth = [] [[nodiscard]] (const Interop& interop) noexcept -> bool { return interop.toId != nullptr && interop.toWindow != nullptr; };
+        if (!HasBoth(TheInterop()))
+            return std::nullopt;
+        return ConvertedBy(TheInterop(), window);
+    };
+
+    static constexpr auto IsThere = [] [[nodiscard]] (const std::optional<WindowId>& id) noexcept -> bool { return id.has_value(); };
     const std::size_t many = std::min(windows.size(), kMaxExcluded);
     const auto converted = windows.first(many) | std::views::transform([](HWND w) { return IdOf(w); });
     if (!std::ranges::all_of(converted, IsThere))
@@ -364,70 +335,53 @@ struct Interop
     return SUCCEEDED(hr) && found != FALSE;
 }
 
-void NoteAt(IWindowIdVectorView* held, UINT32 at) noexcept
-{
-    WindowId item{};
-    const HRESULT hr = held->GetAt(at, &item);
-    NoteTwo("  holds", static_cast<unsigned long>(hr), item.Value);
-}
-
 // What the session says it holds, read out one at a time rather than trusted. A list that comes back
 // empty, or short, or holding something else, is the difference between our fault and Windows's.
 void NoteHeld(IWindowIdVectorView* held) noexcept
 {
+    static constexpr auto NoteAt = [](IWindowIdVectorView* held, UINT32 at) noexcept -> void {
+        WindowId item{};
+        const HRESULT hr = held->GetAt(at, &item);
+        NoteTwo("  holds", static_cast<unsigned long>(hr), item.Value);
+    };
     UINT32 size = 0;
     NoteOne("GetWindowExclusionList size hr", static_cast<unsigned long>(held->get_Size(&size)));
     NoteOne("  size", size);
     std::ranges::for_each(std::views::iota(0u, size), [held](UINT32 at) { NoteAt(held, at); });
 }
 
-[[nodiscard]] bool NamesAll(IWindowIdVectorView* held, const WindowIds& ids, std::size_t count) noexcept
-{
-    return std::ranges::all_of(std::span<const WindowId>(ids.data(), count), [held](WindowId id) { return Names(held, id); });
-}
-
-// Read back what the session says it is excluding and look for our own windows in it. Uncovering a window
-// on the strength of a call that quietly did nothing would put the overlay back into its own capture.
-[[nodiscard]] bool CameBack(HRESULT hr, const Com<IWindowIdVectorView>& held) noexcept
-{
-    return SUCCEEDED(hr) && held != nullptr;
-}
-
-[[nodiscard]] bool Searched(const Com<IWindowIdVectorView>& held, const WindowIds& ids, std::size_t count) noexcept
-{
-    NoteHeld(held.Get());
-    return NamesAll(held.Get(), ids, count);
-}
-
-[[nodiscard]] bool HoldsAll(IDisplaySession* display, const WindowIds& ids, std::size_t count) noexcept
-{
-    Com<IWindowIdVectorView> held;
-    const HRESULT hr = display->GetWindowExclusionList(held.GetAddressOf());
-    NoteTwo("GetWindowExclusionList: hr, view", static_cast<unsigned long>(hr), reinterpret_cast<std::uintptr_t>(held.Get()));
-    if (!CameBack(hr, held))
-        return false;
-    return Searched(held, ids, count);
-}
-
-[[nodiscard]] HRESULT Handing(IDisplaySession* display, const WindowIds& ids, std::size_t count) noexcept
-{
-    UINT64 iteration = 0;
-    TheList().Reset(ids, count);
-    const HRESULT hr = display->SetWindowExclusionList(&TheList(), &iteration);
-    NoteTwo("SetWindowExclusionList: hr, iteration", static_cast<unsigned long>(hr), iteration);
-    return hr;
-}
-
 [[nodiscard]] bool Told(IDisplaySession* display, const WindowIds& ids, std::size_t count) noexcept
 {
+    static constexpr auto HoldsAll = [] [[nodiscard]] (IDisplaySession * display, const WindowIds& ids, std::size_t count) noexcept -> bool {
+        // Read back what the session says it is excluding and look for our own windows in it. Uncovering a window
+        // on the strength of a call that quietly did nothing would put the overlay back into its own capture.
+        static constexpr auto CameBack = [] [[nodiscard]] (HRESULT hr, const Com<IWindowIdVectorView>& held) noexcept -> bool { return SUCCEEDED(hr) && held != nullptr; };
+
+        static constexpr auto Searched = [] [[nodiscard]] (const Com<IWindowIdVectorView>& held, const WindowIds& ids, std::size_t count) noexcept -> bool {
+            static constexpr auto NamesAll = [] [[nodiscard]] (IWindowIdVectorView * held, const WindowIds& ids, std::size_t count) noexcept -> bool {
+                return std::ranges::all_of(std::span<const WindowId>(ids.data(), count), [held](WindowId id) { return Names(held, id); });
+            };
+            NoteHeld(held.Get());
+            return NamesAll(held.Get(), ids, count);
+        };
+        Com<IWindowIdVectorView> held;
+        const HRESULT hr = display->GetWindowExclusionList(held.GetAddressOf());
+        NoteTwo("GetWindowExclusionList: hr, view", static_cast<unsigned long>(hr), reinterpret_cast<std::uintptr_t>(held.Get()));
+        if (!CameBack(hr, held))
+            return false;
+        return Searched(held, ids, count);
+    };
+
+    static constexpr auto Handing = [] [[nodiscard]] (IDisplaySession * display, const WindowIds& ids, std::size_t count) noexcept -> HRESULT {
+        UINT64 iteration = 0;
+        TheList().Reset(ids, count);
+        const HRESULT hr = display->SetWindowExclusionList(&TheList(), &iteration);
+        NoteTwo("SetWindowExclusionList: hr, iteration", static_cast<unsigned long>(hr), iteration);
+        return hr;
+    };
     if (FAILED(Handing(display, ids, count)))
         return false;
     return HoldsAll(display, ids, count);
-}
-
-[[nodiscard]] bool ToldIfAny(IDisplaySession* display, const WindowIds& ids, std::size_t count) noexcept
-{
-    return count != 0 && Told(display, ids, count);
 }
 
 } // namespace
@@ -437,52 +391,30 @@ bool SessionCanExcludeWindows(IGraphicsCaptureSession* session) noexcept
     return DisplaySessionOf(session) != nullptr;
 }
 
-void NoteHeldIfAny(IDisplaySession* display, Com<IWindowIdVectorView>& held) noexcept
-{
-    NoteOne("list now: hr", static_cast<unsigned long>(display->GetWindowExclusionList(held.GetAddressOf())));
-    if (held == nullptr)
-        return;
-    NoteHeld(held.Get());
-}
-
-[[nodiscard]] bool Listed(IDisplaySession* display, std::span<const HWND> windows) noexcept
-{
-    WindowIds ids{}; // WAIVER(R2): a local list filled once, before it is handed over.
-    const std::size_t count = Filled(ids, windows);
-    NoteOne("windows converted", count);
-    return ToldIfAny(display, ids, count);
-}
-
 void NoteExclusion(const char* line) noexcept
 {
     Note(line);
 }
 
-[[nodiscard]] UINT64& LastConfiguration() noexcept
-{
-    // WAIVER(R11): one per program, so a number is written down when it changes rather than every frame.
-    static UINT64 seen = ~0ull;
-    return seen;
-}
-
-void NoteConfigurationChange(UINT64 iteration) noexcept
-{
-    if (iteration == LastConfiguration())
-        return;
-    LastConfiguration() = iteration; // WAIVER(R2): the last number seen, replaced whole by this one.
-    NoteOne("frames are now being made under configuration", iteration);
-}
-
-void NoteConfigurationOf(IFrameConfiguration* which) noexcept
-{
-    UINT64 iteration = 0; // WAIVER(R2): the answer of one query, read once after it.
-    if (FAILED(which->get_ConfigurationIteration(&iteration)))
-        return;
-    NoteConfigurationChange(iteration);
-}
-
 void NoteFrameConfiguration(IUnknown* frame) noexcept
 {
+    static constexpr auto NoteConfigurationOf = [](IFrameConfiguration* which) noexcept -> void {
+        static constexpr auto NoteConfigurationChange = [](UINT64 iteration) noexcept -> void {
+            static constexpr auto LastConfiguration = [] [[nodiscard]] () noexcept -> UINT64& {
+                // WAIVER(R11): one per program, so a number is written down when it changes rather than every frame.
+                static UINT64 seen = ~0ull;
+                return seen;
+            };
+            if (iteration == LastConfiguration())
+                return;
+            LastConfiguration() = iteration; // WAIVER(R2): the last number seen, replaced whole by this one.
+            NoteOne("frames are now being made under configuration", iteration);
+        };
+        UINT64 iteration = 0; // WAIVER(R2): the answer of one query, read once after it.
+        if (FAILED(which->get_ConfigurationIteration(&iteration)))
+            return;
+        NoteConfigurationChange(iteration);
+    };
     Com<IFrameConfiguration> which;
     if (FAILED(frame->QueryInterface(kFrameConfigurationIid, reinterpret_cast<void**>(which.GetAddressOf()))))
         return;
@@ -499,6 +431,12 @@ void NoteExclusionWide(const wchar_t* text) noexcept
 
 void NoteExclusionList(IGraphicsCaptureSession* session, const char* when) noexcept
 {
+    static constexpr auto NoteHeldIfAny = [](IDisplaySession* display, Com<IWindowIdVectorView>& held) noexcept -> void {
+        NoteOne("list now: hr", static_cast<unsigned long>(display->GetWindowExclusionList(held.GetAddressOf())));
+        if (held == nullptr)
+            return;
+        NoteHeld(held.Get());
+    };
     const Com<IDisplaySession> display = DisplaySessionOf(session);
     if (display == nullptr)
         return;
@@ -509,6 +447,13 @@ void NoteExclusionList(IGraphicsCaptureSession* session, const char* when) noexc
 
 bool ExcludeWindowsFrom(IGraphicsCaptureSession* session, std::span<const HWND> windows) noexcept
 {
+    static constexpr auto Listed = [] [[nodiscard]] (IDisplaySession * display, std::span<const HWND> windows) noexcept -> bool {
+        static constexpr auto ToldIfAny = [] [[nodiscard]] (IDisplaySession * display, const WindowIds& ids, std::size_t count) noexcept -> bool { return count != 0 && Told(display, ids, count); };
+        WindowIds ids{}; // WAIVER(R2): a local list filled once, before it is handed over.
+        const std::size_t count = Filled(ids, windows);
+        NoteOne("windows converted", count);
+        return ToldIfAny(display, ids, count);
+    };
     const Com<IDisplaySession> display = DisplaySessionOf(session);
     NoteTwo("--- session, display interface", reinterpret_cast<std::uintptr_t>(session), reinterpret_cast<std::uintptr_t>(display.Get()));
     if (display == nullptr)

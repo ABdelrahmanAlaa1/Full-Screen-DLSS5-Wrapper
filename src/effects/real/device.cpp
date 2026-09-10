@@ -17,37 +17,12 @@ using infra::Status;
 constexpr UINT kNvidiaVendorId = 0x10DE;
 constexpr std::uint32_t kMaxAdapters = 16;
 
-[[nodiscard]] Status<Error> EnableDebugLayer(bool wanted) noexcept
-{
-    if (!wanted)
-        return {};
-    Com<ID3D12Debug> debug;
-    return Check(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)), ApiCall::D3D12CreateDevice).transform([&debug] { debug->EnableDebugLayer(); });
-}
-
-[[nodiscard]] UINT FactoryFlags(bool debugLayer) noexcept
-{
-    return debugLayer ? DXGI_CREATE_FACTORY_DEBUG : 0u;
-}
-
-[[nodiscard]] Result<Com<IDXGIFactory4>, Error> CreateFactory(bool debugLayer) noexcept
-{
-    Com<IDXGIFactory4> factory;
-    const HRESULT hr = CreateDXGIFactory2(FactoryFlags(debugLayer), IID_PPV_ARGS(&factory));
-    return Check(hr, ApiCall::CreateDXGIFactory2).transform([&factory] { return factory; });
-}
-
 struct Candidate
 {
     Com<IDXGIAdapter1> adapter;
     DXGI_ADAPTER_DESC1 description;
     std::uint32_t index;
 };
-
-[[nodiscard]] bool IsSoftware(const Candidate& c) noexcept
-{
-    return (c.description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
-}
 
 [[nodiscard]] bool IsNvidia(const Candidate& c) noexcept
 {
@@ -59,15 +34,6 @@ struct Candidate
     return interior::AdapterName::Parse(std::wstring_view(c.description.Description)).value_or(interior::AdapterName{});
 }
 
-// The user-mode driver version, which DXGI reports through the IDXGIDevice interface query.
-[[nodiscard]] std::optional<interior::DriverVersion> ReadDriverVersion(IDXGIAdapter1* adapter) noexcept
-{
-    LARGE_INTEGER version{};
-    if (IsFailure(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &version)))
-        return std::nullopt;
-    return interior::DriverVersionOf(static_cast<std::uint64_t>(version.QuadPart));
-}
-
 [[nodiscard]] bool SupportsD3D12(const Candidate& c) noexcept
 {
     return !IsFailure(D3D12CreateDevice(c.adapter.Get(), D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr));
@@ -75,17 +41,13 @@ struct Candidate
 
 [[nodiscard]] bool IsUsable(const Candidate& c) noexcept
 {
+    static constexpr auto IsSoftware = [] [[nodiscard]] (const Candidate& c) noexcept -> bool { return (c.description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0; };
     return !IsSoftware(c) && SupportsD3D12(c);
 }
 
 [[nodiscard]] bool MatchesRequest(const Candidate& c, const std::optional<interior::RequestedAdapter>& request) noexcept
 {
     return request.has_value() ? c.index == request->Get() : IsNvidia(c);
-}
-
-[[nodiscard]] bool IsWanted(const Candidate& c, const std::optional<interior::RequestedAdapter>& request) noexcept
-{
-    return IsUsable(c) && MatchesRequest(c, request);
 }
 
 [[nodiscard]] std::optional<Candidate> CandidateAt(IDXGIFactory4* factory, std::uint32_t index) noexcept
@@ -95,76 +57,6 @@ struct Candidate
         return std::nullopt;
     ENSURE(!IsFailure(c.adapter->GetDesc1(&c.description)));
     return c;
-}
-
-[[nodiscard]] std::optional<Candidate> WantedOrNothing(const Candidate& c, const std::optional<interior::RequestedAdapter>& request) noexcept
-{
-    if (!IsWanted(c, request))
-        return std::nullopt;
-    return c;
-}
-
-[[nodiscard]] std::optional<Candidate> WantedAt(IDXGIFactory4* factory, std::uint32_t index, const std::optional<interior::RequestedAdapter>& request) noexcept
-{
-    return CandidateAt(factory, index).and_then([&request](const Candidate& c) { return WantedOrNothing(c, request); });
-}
-
-[[nodiscard]] std::optional<Candidate> FirstWanted(const std::optional<Candidate>& found, IDXGIFactory4* factory, std::uint32_t index,
-                                                   const std::optional<interior::RequestedAdapter>& request) noexcept
-{
-    return found.has_value() ? found : WantedAt(factory, index, request);
-}
-
-[[nodiscard]] bool IsListable(const std::optional<Candidate>& c) noexcept
-{
-    return c.has_value() && IsUsable(*c);
-}
-
-[[nodiscard]] AdapterList WithUsable(const AdapterList& so, const std::optional<Candidate>& c) noexcept
-{
-    if (!IsListable(c))
-        return so;
-    return so.Push(AdapterEntry{ c->index, NameOf(*c), IsNvidia(*c) }).value_or(so);
-}
-
-[[nodiscard]] Result<Candidate, Error> SelectAdapter(IDXGIFactory4* factory, const std::optional<interior::RequestedAdapter>& request) noexcept
-{
-    const std::optional<Candidate> found = std::ranges::fold_left(std::views::iota(std::uint32_t{ 0 }, kMaxAdapters), std::optional<Candidate>{},
-                                                                  [&](const std::optional<Candidate>& acc, std::uint32_t i) { return FirstWanted(acc, factory, i, request); });
-    if (!found.has_value())
-        return Fail(Error{ ApiCall::AdapterNotFound, 0 });
-    return *found;
-}
-
-[[nodiscard]] Result<Com<ID3D12Device>, Error> CreateDevice(IDXGIAdapter1* adapter) noexcept
-{
-    Com<ID3D12Device> device;
-    const HRESULT hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device));
-    return Check(hr, ApiCall::D3D12CreateDevice).transform([&device] { return device; });
-}
-
-[[nodiscard]] Result<Com<ID3D12CommandQueue>, Error> CreateQueue(ID3D12Device* device) noexcept
-{
-    const D3D12_COMMAND_QUEUE_DESC desc{ D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0 };
-    Com<ID3D12CommandQueue> queue;
-    const HRESULT hr = device->CreateCommandQueue(&desc, IID_PPV_ARGS(&queue));
-    return Check(hr, ApiCall::CreateCommandQueue).transform([&queue] { return queue; });
-}
-
-[[nodiscard]] Result<UniqueHandle, Error> CreateFenceEvent() noexcept
-{
-    HANDLE handle = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (handle == nullptr)
-        return Fail(LastError(ApiCall::CreateEventW));
-    return UniqueHandle(handle);
-}
-
-[[nodiscard]] Result<Com<ID3D12DescriptorHeap>, Error> CreateHeap(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, std::uint32_t count, D3D12_DESCRIPTOR_HEAP_FLAGS flags) noexcept
-{
-    const D3D12_DESCRIPTOR_HEAP_DESC desc{ type, count, flags, 0 };
-    Com<ID3D12DescriptorHeap> heap;
-    const HRESULT hr = device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap));
-    return Check(hr, ApiCall::CreateDescriptorHeap).transform([&heap] { return heap; });
 }
 
 struct Core
@@ -180,71 +72,9 @@ struct Queues
     Com<ID3D12Fence> fence;
 };
 
-[[nodiscard]] Result<Core, Error> CreateCore(const DeviceSettings& settings) noexcept
-{
-    return EnableDebugLayer(settings.debugLayer).and_then([&] { return CreateFactory(settings.debugLayer); }).and_then([&](const Com<IDXGIFactory4>& factory) {
-        return SelectAdapter(factory.Get(), settings.adapter).and_then([&](const Candidate& candidate) {
-            return CreateDevice(candidate.adapter.Get()).transform([&](const Com<ID3D12Device>& device) { return Core{ factory, candidate, device }; });
-        });
-    });
-}
-
-[[nodiscard]] Result<Queues, Error> CreateQueues(ID3D12Device* device) noexcept
-{
-    return CreateQueue(device).and_then(
-        [device](const Com<ID3D12CommandQueue>& queue) { return CreateFence(device, D3D12_FENCE_FLAG_NONE).transform([&queue](const Com<ID3D12Fence>& fence) { return Queues{ queue, fence }; }); });
-}
-
-[[nodiscard]] GpuDevice Assemble(Core& core, Queues& queues, UniqueHandle& event, Com<ID3D12DescriptorHeap>& rtv, Com<ID3D12DescriptorHeap>& srv) noexcept
-{
-    ID3D12Device* device = core.device.Get();
-    return GpuDevice{ core.factory,
-                      core.candidate.adapter,
-                      core.device,
-                      queues.queue,
-                      queues.fence,
-                      std::move(event),
-                      rtv,
-                      srv,
-                      device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV),
-                      device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV),
-                      IsNvidia(core.candidate),
-                      NameOf(core.candidate),
-                      ReadDriverVersion(core.candidate.adapter.Get()) };
-}
-
-[[nodiscard]] Result<GpuDevice, Error> AssembleDevice(Core core, Queues queues) noexcept
-{
-    return CreateFenceEvent().and_then([&](UniqueHandle event) {
-        return CreateHeap(core.device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kRtvSlots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE).and_then([&](Com<ID3D12DescriptorHeap> rtv) {
-            return CreateHeap(core.device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kSrvSlots, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE).transform([&](Com<ID3D12DescriptorHeap> srv) {
-                return Assemble(core, queues, event, rtv, srv);
-            });
-        });
-    });
-}
-
-[[nodiscard]] bool IsComplete(ID3D12Fence* fence, interior::FenceValue value) noexcept
-{
-    return fence->GetCompletedValue() >= value.Get();
-}
-
-[[nodiscard]] Status<Error> WaitOnEvent(const GpuDevice& gpu, interior::Microseconds timeout) noexcept
-{
-    const DWORD milliseconds = static_cast<DWORD>(timeout.Get() / 1000u);
-    if (::WaitForSingleObject(gpu.fenceEvent.get(), milliseconds) != WAIT_OBJECT_0)
-        return Fail(Error{ ApiCall::WaitForFence, static_cast<std::uint32_t>(milliseconds) });
-    return {};
-}
-
 [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE CpuHandleAt(ID3D12DescriptorHeap* heap, std::uint32_t increment, std::uint32_t index) noexcept
 {
     return D3D12_CPU_DESCRIPTOR_HANDLE{ heap->GetCPUDescriptorHandleForHeapStart().ptr + static_cast<SIZE_T>(index) * increment };
-}
-
-[[nodiscard]] Status<Error> ArmAndWait(const GpuDevice& gpu, interior::FenceValue value, interior::Microseconds timeout) noexcept
-{
-    return Check(gpu.fence->SetEventOnCompletion(value.Get(), gpu.fenceEvent.get()), ApiCall::SetEventOnCompletion).and_then([&] { return WaitOnEvent(gpu, timeout); });
 }
 
 } // namespace
@@ -258,6 +88,116 @@ Result<Com<ID3D12Fence>, Error> CreateFence(ID3D12Device* device, D3D12_FENCE_FL
 
 Result<GpuDevice, Error> CreateGpuDevice(const DeviceSettings& settings) noexcept
 {
+    static constexpr auto CreateCore = [] [[nodiscard]] (const DeviceSettings& settings) noexcept -> Result<Core, Error> {
+        static constexpr auto EnableDebugLayer = [] [[nodiscard]] (bool wanted) noexcept -> Status<Error> {
+            if (!wanted)
+                return {};
+            Com<ID3D12Debug> debug;
+            return Check(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)), ApiCall::D3D12CreateDevice).transform([&debug] { debug->EnableDebugLayer(); });
+        };
+
+        static constexpr auto CreateFactory = [] [[nodiscard]] (bool debugLayer) noexcept -> Result<Com<IDXGIFactory4>, Error> {
+            static constexpr auto FactoryFlags = [] [[nodiscard]] (bool debugLayer) noexcept -> UINT { return debugLayer ? DXGI_CREATE_FACTORY_DEBUG : 0u; };
+            Com<IDXGIFactory4> factory;
+            const HRESULT hr = CreateDXGIFactory2(FactoryFlags(debugLayer), IID_PPV_ARGS(&factory));
+            return Check(hr, ApiCall::CreateDXGIFactory2).transform([&factory] { return factory; });
+        };
+
+        static constexpr auto SelectAdapter = [] [[nodiscard]] (IDXGIFactory4 * factory, const std::optional<interior::RequestedAdapter>& request) noexcept -> Result<Candidate, Error> {
+            static constexpr auto FirstWanted = [] [[nodiscard]] (const std::optional<Candidate>& found, IDXGIFactory4* factory, std::uint32_t index,
+                                                                  const std::optional<interior::RequestedAdapter>& request) noexcept -> std::optional<Candidate> {
+                static constexpr auto WantedAt = [] [[nodiscard]] (IDXGIFactory4 * factory, std::uint32_t index,
+                                                                   const std::optional<interior::RequestedAdapter>& request) noexcept -> std::optional<Candidate> {
+                    static constexpr auto WantedOrNothing = [] [[nodiscard]] (const Candidate& c, const std::optional<interior::RequestedAdapter>& request) noexcept -> std::optional<Candidate> {
+                        static constexpr auto IsWanted = [] [[nodiscard]] (const Candidate& c, const std::optional<interior::RequestedAdapter>& request) noexcept -> bool {
+                            return IsUsable(c) && MatchesRequest(c, request);
+                        };
+                        if (!IsWanted(c, request))
+                            return std::nullopt;
+                        return c;
+                    };
+                    return CandidateAt(factory, index).and_then([&request](const Candidate& c) { return WantedOrNothing(c, request); });
+                };
+                return found.has_value() ? found : WantedAt(factory, index, request);
+            };
+            const std::optional<Candidate> found = std::ranges::fold_left(std::views::iota(std::uint32_t{ 0 }, kMaxAdapters), std::optional<Candidate>{},
+                                                                          [&](const std::optional<Candidate>& acc, std::uint32_t i) { return FirstWanted(acc, factory, i, request); });
+            if (!found.has_value())
+                return Fail(Error{ ApiCall::AdapterNotFound, 0 });
+            return *found;
+        };
+
+        static constexpr auto CreateDevice = [] [[nodiscard]] (IDXGIAdapter1 * adapter) noexcept -> Result<Com<ID3D12Device>, Error> {
+            Com<ID3D12Device> device;
+            const HRESULT hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device));
+            return Check(hr, ApiCall::D3D12CreateDevice).transform([&device] { return device; });
+        };
+        return EnableDebugLayer(settings.debugLayer).and_then([&] { return CreateFactory(settings.debugLayer); }).and_then([&](const Com<IDXGIFactory4>& factory) {
+            return SelectAdapter(factory.Get(), settings.adapter).and_then([&](const Candidate& candidate) {
+                return CreateDevice(candidate.adapter.Get()).transform([&](const Com<ID3D12Device>& device) { return Core{ factory, candidate, device }; });
+            });
+        });
+    };
+
+    static constexpr auto CreateQueues = [] [[nodiscard]] (ID3D12Device * device) noexcept -> Result<Queues, Error> {
+        static constexpr auto CreateQueue = [] [[nodiscard]] (ID3D12Device * device) noexcept -> Result<Com<ID3D12CommandQueue>, Error> {
+            const D3D12_COMMAND_QUEUE_DESC desc{ D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0 };
+            Com<ID3D12CommandQueue> queue;
+            const HRESULT hr = device->CreateCommandQueue(&desc, IID_PPV_ARGS(&queue));
+            return Check(hr, ApiCall::CreateCommandQueue).transform([&queue] { return queue; });
+        };
+        return CreateQueue(device).and_then([device](const Com<ID3D12CommandQueue>& queue) {
+            return CreateFence(device, D3D12_FENCE_FLAG_NONE).transform([&queue](const Com<ID3D12Fence>& fence) { return Queues{ queue, fence }; });
+        });
+    };
+
+    static constexpr auto AssembleDevice = [] [[nodiscard]] (Core core, Queues queues) noexcept -> Result<GpuDevice, Error> {
+        static constexpr auto CreateFenceEvent = [] [[nodiscard]] () noexcept -> Result<UniqueHandle, Error> {
+            HANDLE handle = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (handle == nullptr)
+                return Fail(LastError(ApiCall::CreateEventW));
+            return UniqueHandle(handle);
+        };
+
+        static constexpr auto CreateHeap = [] [[nodiscard]] (ID3D12Device * device, D3D12_DESCRIPTOR_HEAP_TYPE type, std::uint32_t count,
+                                                             D3D12_DESCRIPTOR_HEAP_FLAGS flags) noexcept -> Result<Com<ID3D12DescriptorHeap>, Error> {
+            const D3D12_DESCRIPTOR_HEAP_DESC desc{ type, count, flags, 0 };
+            Com<ID3D12DescriptorHeap> heap;
+            const HRESULT hr = device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap));
+            return Check(hr, ApiCall::CreateDescriptorHeap).transform([&heap] { return heap; });
+        };
+
+        static constexpr auto Assemble = [] [[nodiscard]] (Core & core, Queues & queues, UniqueHandle & event, Com<ID3D12DescriptorHeap> & rtv, Com<ID3D12DescriptorHeap> & srv) noexcept -> GpuDevice {
+            // The user-mode driver version, which DXGI reports through the IDXGIDevice interface query.
+            static constexpr auto ReadDriverVersion = [] [[nodiscard]] (IDXGIAdapter1 * adapter) noexcept -> std::optional<interior::DriverVersion> {
+                LARGE_INTEGER version{};
+                if (IsFailure(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &version)))
+                    return std::nullopt;
+                return interior::DriverVersionOf(static_cast<std::uint64_t>(version.QuadPart));
+            };
+            ID3D12Device* device = core.device.Get();
+            return GpuDevice{ core.factory,
+                              core.candidate.adapter,
+                              core.device,
+                              queues.queue,
+                              queues.fence,
+                              std::move(event),
+                              rtv,
+                              srv,
+                              device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV),
+                              device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV),
+                              IsNvidia(core.candidate),
+                              NameOf(core.candidate),
+                              ReadDriverVersion(core.candidate.adapter.Get()) };
+        };
+        return CreateFenceEvent().and_then([&](UniqueHandle event) {
+            return CreateHeap(core.device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kRtvSlots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE).and_then([&](Com<ID3D12DescriptorHeap> rtv) {
+                return CreateHeap(core.device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kSrvSlots, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE).transform([&](Com<ID3D12DescriptorHeap> srv) {
+                    return Assemble(core, queues, event, rtv, srv);
+                });
+            });
+        });
+    };
     return CreateCore(settings).and_then([](Core core) { return CreateQueues(core.device.Get()).and_then([&core](Queues queues) { return AssembleDevice(std::move(core), std::move(queues)); }); });
 }
 
@@ -269,6 +209,17 @@ Result<interior::FenceValue, Error> SignalFence(const GpuDevice& gpu, interior::
 
 Status<Error> WaitForFence(const GpuDevice& gpu, interior::FenceValue value, interior::Microseconds timeout) noexcept
 {
+    static constexpr auto IsComplete = [] [[nodiscard]] (ID3D12Fence * fence, interior::FenceValue value) noexcept -> bool { return fence->GetCompletedValue() >= value.Get(); };
+
+    static constexpr auto ArmAndWait = [] [[nodiscard]] (const GpuDevice& gpu, interior::FenceValue value, interior::Microseconds timeout) noexcept -> Status<Error> {
+        static constexpr auto WaitOnEvent = [] [[nodiscard]] (const GpuDevice& gpu, interior::Microseconds timeout) noexcept -> Status<Error> {
+            const DWORD milliseconds = static_cast<DWORD>(timeout.Get() / 1000u);
+            if (::WaitForSingleObject(gpu.fenceEvent.get(), milliseconds) != WAIT_OBJECT_0)
+                return Fail(Error{ ApiCall::WaitForFence, static_cast<std::uint32_t>(milliseconds) });
+            return {};
+        };
+        return Check(gpu.fence->SetEventOnCompletion(value.Get(), gpu.fenceEvent.get()), ApiCall::SetEventOnCompletion).and_then([&] { return WaitOnEvent(gpu, timeout); });
+    };
     if (IsComplete(gpu.fence.Get(), value))
         return {};
     return ArmAndWait(gpu, value, timeout);
@@ -333,6 +284,12 @@ Result<interior::FenceValue, Error> FlushCommandList(const GpuDevice& gpu, ID3D1
 
 AdapterList UsableAdapters(IDXGIFactory4* factory) noexcept
 {
+    static constexpr auto WithUsable = [] [[nodiscard]] (const AdapterList& so, const std::optional<Candidate>& c) noexcept -> AdapterList {
+        static constexpr auto IsListable = [] [[nodiscard]] (const std::optional<Candidate>& c) noexcept -> bool { return c.has_value() && IsUsable(*c); };
+        if (!IsListable(c))
+            return so;
+        return so.Push(AdapterEntry{ c->index, NameOf(*c), IsNvidia(*c) }).value_or(so);
+    };
     const auto add = [factory](const AdapterList& so, std::uint32_t index) { return WithUsable(so, CandidateAt(factory, index)); };
     return std::ranges::fold_left(std::views::iota(std::uint32_t{ 0 }, kMaxAdapters), AdapterList{}, add);
 }
