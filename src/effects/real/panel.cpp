@@ -81,10 +81,9 @@ struct FieldSpec
     const wchar_t* warning; // what a glyph beside the label warns of, or nothing
 };
 
-constexpr wchar_t kPassesWarning[] = L"Experimental.\n"
-                                     L"Every pass runs the whole model again on the picture the last pass made, so three passes cost three times the time of one and the picture falls that far "
-                                     L"behind the desktop.\n"
-                                     L"The model was trained to run once.";
+constexpr wchar_t kPassesWarning[] = L"EXPERIMENTAL - FOR FUN ONLY.\n"
+                                     L"Run the model multiple times against each same frame.\n"
+                                     L"Running above 1 is NOT how it was meant to be used, but can lead to humorous results.";
 
 // As far as a number the model puts no top on may be typed or stepped. The slider stretches to follow.
 constexpr int kOpenUnits = 1000;
@@ -95,11 +94,12 @@ constexpr int kOpenUnits = 1000;
 }
 
 constexpr std::array<FieldSpec, kFieldCount> kFields{ {
-    { L"Intensity", L"How much of the model's work to keep. Past 1 the model makes no further difference, so 1 is the whole of it.", 0, 100, 100, 10, 100, nullptr },
-    { L"Local structure", L"Detail the model adds within a region. The slider's end is not the model's: type or step past it and the slider follows. Does nothing while auto mask is off.", 0, 1000,
-      100, 100, Open(100), nullptr },
-    { L"Local tone", L"How far the model moves local brightness. The slider's end is not the model's: type or step past it and the slider follows.", 0, 1000, 100, 100, Open(100), nullptr },
-    { L"Skin structure", L"Detail on skin. The slider's end is not the model's. Does nothing while auto mask is off, or while skin follows local structure.", 0, 1000, 100, 100, Open(100), nullptr },
+    { L"Intensity", L"0 is the original image (0%), 1.0 is the full effect (100%).\r\nEffectively a blending percentage.", 0, 100, 100, 10, 100, nullptr },
+    { L"Local structure", L"Detail the model adds within a region.\r\nDoes nothing while auto mask is off.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100, 100, Open(100),
+      nullptr },
+    { L"Local tone", L"How far the model moves local brightness.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100, 100, Open(100), nullptr },
+    { L"Skin structure", L"Detail on skin.\r\nDoes nothing while auto mask is off, or while skin follows local structure.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100,
+      100, Open(100), nullptr },
     { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, 400, nullptr },
     { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, 400, nullptr },
     { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, 10, 100, nullptr },
@@ -109,8 +109,7 @@ constexpr std::array<FieldSpec, kFieldCount> kFields{ {
     { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, 7, nullptr },
     { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, 15, nullptr },
     { L"Model passes",
-      L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run; the slider ends at 8, and "
-      L"typing or stepping goes on past it.",
+      L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run.\r\n(You can manually set this higher than the slider limit)",
       1, 8, 1, 1, std::numeric_limits<int>::max(), kPassesWarning },
 } };
 
