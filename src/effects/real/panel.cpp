@@ -73,9 +73,13 @@ struct FieldSpec
     int minimum;
     int maximum; // where the slider ends, which for an open field is only where it ends to begin with
     int steps;
-    int increment; // what one click of an arrow moves, in the same steps as the rest
-    bool open;     // whether the model lets the number go on past the slider's end
+    int increment;          // what one click of an arrow moves, in the same steps as the rest
+    bool open;              // whether the model lets the number go on past the slider's end
+    const wchar_t* warning; // what a glyph beside the label warns of, or nothing
 };
+
+constexpr wchar_t kPassesWarning[] = L"Experimental. Every pass runs the whole model again on the picture the last pass made, so three passes cost three times the time of one and the "
+                                     L"picture falls that far behind the desktop. The model was trained to run once.";
 
 // As far as a number the model puts no top on may be typed or stepped. The slider stretches to follow.
 constexpr int kOpenUnits = 1000;
@@ -86,18 +90,21 @@ constexpr int kOpenUnits = 1000;
 }
 
 constexpr std::array<FieldSpec, kFieldCount> kFields{ {
-    { L"Intensity", L"How much of the model's work to keep. Past 1 the model makes no further difference, so 1 is the whole of it.", 0, 100, 100, 10, false },
+    { L"Intensity", L"How much of the model's work to keep. Past 1 the model makes no further difference, so 1 is the whole of it.", 0, 100, 100, 10, false, nullptr },
     { L"Local structure", L"Detail the model adds within a region. The slider's end is not the model's: type or step past it and the slider follows. Does nothing while auto mask is off.", 0, 1000,
-      100, 100, true },
-    { L"Local tone", L"How far the model moves local brightness. The slider's end is not the model's: type or step past it and the slider follows.", 0, 1000, 100, 100, true },
-    { L"Skin structure", L"Detail on skin. The slider's end is not the model's. Does nothing while auto mask is off, or while skin follows local structure.", 0, 1000, 100, 100, true },
-    { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, false },
-    { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, false },
-    { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, 10, false },
-    { L"Depth plane", L"The desktop has no depth, so one flat value stands in for all of it. Every pixel carries the same number, so changing it does nothing you can see.", 0, 100, 100, 10, false },
-    { L"Reset threshold", L"How much of the picture has to go unmatched before the model's history is thrown away.", 0, 100, 100, 10, false },
-    { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, false },
-    { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, false },
+      100, 100, true, nullptr },
+    { L"Local tone", L"How far the model moves local brightness. The slider's end is not the model's: type or step past it and the slider follows.", 0, 1000, 100, 100, true, nullptr },
+    { L"Skin structure", L"Detail on skin. The slider's end is not the model's. Does nothing while auto mask is off, or while skin follows local structure.", 0, 1000, 100, 100, true, nullptr },
+    { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, false, nullptr },
+    { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, false, nullptr },
+    { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, 10, false, nullptr },
+    { L"Depth plane", L"The desktop has no depth, so one flat value stands in for all of it. Every pixel carries the same number, so changing it does nothing you can see.", 0, 100, 100, 10, false,
+      nullptr },
+    { L"Reset threshold", L"How much of the picture has to go unmatched before the model's history is thrown away.", 0, 100, 100, 10, false, nullptr },
+    { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, false, nullptr },
+    { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, false, nullptr },
+    { L"Model passes", L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run.", 1,
+      static_cast<int>(interior::kMaxPasses), 1, 1, false, kPassesWarning },
 } };
 
 struct ToggleSpec
@@ -217,9 +224,9 @@ struct PageSpec
 // UI correction reads a layer nothing binds, and optical flow drives a backend this build leaves out.
 constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
     { L"Model",
-      12,
+      13,
       { Of(Toggle::NeuralRendering), Of(Group::Style), Of(List::Preset), Of(Field::Intensity), Of(Field::LocalStructure), Of(Field::LocalTone), Of(Toggle::SkinFollowsStructure), Of(Field::Skin),
-        Of(Toggle::AutoMask), Of(Field::ResetThreshold), Of(Field::MvScaleX), Of(Field::MvScaleY) } },
+        Of(Toggle::AutoMask), Of(Field::ResetThreshold), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::Passes) } },
     { L"View",
       10,
       { Of(Pick::Window), Of(List::Source), Of(List::Target), Of(Group::Compare), Of(Field::Split), Of(Toggle::Vsync), Of(Group::Cursor), Of(Toggle::CaptureBorder), Of(Toggle::Topmost),
@@ -415,6 +422,7 @@ LRESULT CALLBACK PanelProc(HWND window, UINT message, WPARAM w, LPARAM l) noexce
 
 // Segoe MDL2 Assets has shipped with Windows since 10, and its refresh glyph fits a button too short for a word.
 constexpr wchar_t kRefreshGlyph[] = L"\uE72C";
+constexpr wchar_t kWarningGlyph[] = L"\uE7BA";
 constexpr wchar_t kResetHint[] = L"Put this setting back to the value it starts at.";
 constexpr wchar_t kReleaseHint[] = L"Let the window go and capture a monitor again.";
 
@@ -591,7 +599,8 @@ void SetChecked(HWND check, bool checked) noexcept
              live.depth.Get(),
              live.resetThreshold.Get(),
              static_cast<float>(o.motionFinestLevel.Get()),
-             static_cast<float>(o.srPreset.Get()) };
+             static_cast<float>(o.srPreset.Get()),
+             static_cast<float>(live.passes.Get()) };
 }
 
 [[nodiscard]] std::array<bool, kToggleCount> StartingToggles(const interior::Options& o, const interior::LiveSettings& live) noexcept
@@ -628,6 +637,7 @@ struct Built
     std::array<HWND, kFieldCount> boxes;
     std::array<HWND, kFieldCount> spins;
     std::array<HWND, kFieldCount> resets;
+    std::array<HWND, kFieldCount> warnings;
     std::array<HWND, kToggleCount> toggles;
     std::array<HWND, kToggleCount> toggleResets;
     std::array<HWND, kGroupCount> groupLabels;
@@ -844,9 +854,9 @@ LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) no
     return static_cast<Page>(std::clamp<std::size_t>(static_cast<std::size_t>(std::max(selected, 0)), 0, static_cast<std::size_t>(Page::Count) - 1));
 }
 
-[[nodiscard]] std::array<HWND, 5> ControlsOfField(const ControlPanel& panel, std::size_t f) noexcept
+[[nodiscard]] std::array<HWND, 6> ControlsOfField(const ControlPanel& panel, std::size_t f) noexcept
 {
-    return { panel.labels[f], panel.sliders[f], panel.boxes[f], panel.spins[f], panel.resets[f] };
+    return { panel.labels[f], panel.sliders[f], panel.boxes[f], panel.spins[f], panel.resets[f], panel.warnings[f] };
 }
 
 [[nodiscard]] int HowOf(bool visible) noexcept
@@ -947,9 +957,13 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
                                    IsOn(panel, Toggle::AutoMask),
                                    IsOn(panel, Toggle::UiCorrection) };
     };
+    static constexpr auto PassesOf = [] [[nodiscard]] (const ControlPanel& panel, interior::PassCount held) noexcept -> interior::PassCount {
+        return interior::PassCountTag::Parse(static_cast<std::uint32_t>(std::lround(SettledValue(panel, Field::Passes)))).value_or(held);
+    };
     const auto scale = [&panel](Field field, interior::MotionScale held) { return interior::MotionScaleTag::Parse(SettledValue(panel, field)).value_or(held); };
     return interior::LiveSettings{ IsOn(panel, Toggle::NeuralRendering),
                                    TuningOf(panel, current.tuning),
+                                   PassesOf(panel, current.passes),
                                    IsOn(panel, Toggle::DepthInverted),
                                    scale(Field::MvScaleX, current.mvScaleX),
                                    scale(Field::MvScaleY, current.mvScaleY),
@@ -1372,10 +1386,18 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         return CreateChild(parent, WC_EDITW, L"", ES_LEFT | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, Bounds(m, at.left + kBoxOffset, at.control, kBoxWidth, m.ControlHeight()));
                     });
                     built.spins = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateSpin(parent, built.boxes[f], f, kFields[f], steps(f)); });
+                    // A number that wants a word of caution wears a glyph at the end of its label line; the hint says what for.
+                    static constexpr auto CreateWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t f) noexcept -> HWND {
+                        if (kFields[f].warning == nullptr)
+                            return nullptr;
+                        const Placement at = PlaceOfRow(Kind::Field, f, m);
+                        return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_NOTIFY, 0, Bounds(m, at.left + kResetOffset, at.top, kResetWidth, m.LabelHeight()));
+                    };
                     built.resets = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
                         return CreateButton(parent, m, kRefreshGlyph, 0, at.left + kResetOffset, at.control, kResetWidth);
                     });
+                    built.warnings = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateWarning(parent, m, f); });
                     return built;
                 };
 
@@ -1554,6 +1576,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.boxes,
                                  built.spins,
                                  built.resets,
+                                 built.warnings,
                                  built.toggles,
                                  built.toggleResets,
                                  built.groupLabels,
@@ -1628,8 +1651,13 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     // WAIVER(R7): walking one table twice is what several of these do; each does something else with it.
                     // A number's hint sits on the slider and on the box, so either one under the pointer explains itself.
                     static constexpr auto HintNumbers = [](const ControlPanel& panel, HWND parent) noexcept -> void {
+                        static constexpr auto HintWarning = [](const ControlPanel& panel, HWND parent, std::size_t f) noexcept -> void {
+                            if (panel.warnings[f] != nullptr)
+                                AddHint(panel.tooltip, parent, panel.warnings[f], kFields[f].warning);
+                        };
                         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kFieldCount), [&panel, parent](std::size_t f) { AddHint(panel.tooltip, parent, panel.sliders[f], kFields[f].hint); });
                         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kFieldCount), [&panel, parent](std::size_t f) { AddHint(panel.tooltip, parent, panel.boxes[f], kFields[f].hint); });
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kFieldCount), [&panel, parent](std::size_t f) { HintWarning(panel, parent, f); });
                     };
 
                     static constexpr auto HintResets = [](const ControlPanel& panel, HWND parent) noexcept -> void {
@@ -1678,6 +1706,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     std::ranges::for_each(panel.resets, [&panel](HWND button) { WearIcon(panel, button); });
                     std::ranges::for_each(panel.toggleResets, [&panel](HWND button) { WearIcon(panel, button); });
                     std::ranges::for_each(panel.pickResets, [&panel](HWND button) { WearIcon(panel, button); });
+                    std::ranges::for_each(panel.warnings, [&panel](HWND glyph) { WearIcon(panel, glyph); });
                     WearIcon(panel, panel.expander);
                     (void)::SendMessageW(panel.notice, WM_SETFONT, reinterpret_cast<WPARAM>(panel.boldFont.get()), TRUE);
                 };
@@ -1893,7 +1922,8 @@ interior::CommandLine RestartCommandLine(const ControlPanel& panel, const interi
     // The live settings travel with the new session too, so it starts where this one left off.
     static constexpr auto ModelArguments = [] [[nodiscard]] (const ControlPanel& panel, const Arguments& so) noexcept -> Arguments {
         const interior::LiveSettings live = LiveOf(panel, interior::DefaultLive(interior::DefaultOptions()));
-        const std::array<Piece, 8> pieces{ Switch(panel, Toggle::NeuralRendering, "nr"),
+        const std::array<Piece, 9> pieces{ Switch(panel, Toggle::NeuralRendering, "nr"),
+                                           Counted("nr-passes", live.passes.Get()),
                                            Counted("nr-preset", live.tuning.preset.Get()),
                                            Decimal("nr-intensity", live.tuning.intensity.Get()),
                                            Decimal("nr-local-structure", live.tuning.localStructure.Get()),

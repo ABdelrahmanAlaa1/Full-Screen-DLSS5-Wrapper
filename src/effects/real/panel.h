@@ -19,7 +19,7 @@ using UniqueFont = std::unique_ptr<std::remove_pointer_t<HFONT>, FontDeleter>;
 enum class Page : std::size_t { Model, View, Advanced, Inert, Count };
 
 // A number the operator sets: a slider to sweep it, a box to type it, arrows to step it.
-enum class Field : std::size_t { Intensity, LocalStructure, LocalTone, Skin, MvScaleX, MvScaleY, Split, DepthValue, ResetThreshold, MvLevel, SrPreset, Count };
+enum class Field : std::size_t { Intensity, LocalStructure, LocalTone, Skin, MvScaleX, MvScaleY, Split, DepthValue, ResetThreshold, MvLevel, SrPreset, Passes, Count };
 
 // A switch the operator flips.
 enum class Toggle : std::size_t {
@@ -94,6 +94,7 @@ struct ControlPanel
     std::array<HWND, kFieldCount> boxes;
     std::array<HWND, kFieldCount> spins;
     std::array<HWND, kFieldCount> resets;
+    std::array<HWND, kFieldCount> warnings; // a glyph at the end of a label whose number wants a word of caution, or nothing
     std::array<HWND, kToggleCount> toggles;
     std::array<HWND, kToggleCount> toggleResets;
     std::array<HWND, kGroupCount> groupLabels;
