@@ -48,6 +48,7 @@ constexpr int kResetOffset = 312;
 constexpr int kResetWidth = 28;
 constexpr int kChoiceWidth = 122;
 constexpr int kTabHeight = 30;
+constexpr int kTipWidth = 360; // a hint wraps at this rather than running on in one line
 // A runtime list carries names rather than words, so its buttons are wider and fewer to a line.
 constexpr int kListChoiceWidth = 186;
 constexpr std::size_t kListPerLine = 2;
@@ -80,8 +81,10 @@ struct FieldSpec
     const wchar_t* warning; // what a glyph beside the label warns of, or nothing
 };
 
-constexpr wchar_t kPassesWarning[] = L"Experimental. Every pass runs the whole model again on the picture the last pass made, so three passes cost three times the time of one and the "
-                                     L"picture falls that far behind the desktop. The model was trained to run once.";
+constexpr wchar_t kPassesWarning[] = L"Experimental.\n"
+                                     L"Every pass runs the whole model again on the picture the last pass made, so three passes cost three times the time of one and the picture falls that far "
+                                     L"behind the desktop.\n"
+                                     L"The model was trained to run once.";
 
 // As far as a number the model puts no top on may be typed or stepped. The slider stretches to follow.
 constexpr int kOpenUnits = 1000;
@@ -1298,9 +1301,16 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 return UniqueFont(::CreateFontIndirectW(&description));
             };
 
-            static constexpr auto CreateTooltip = [] [[nodiscard]] (HWND parent) noexcept -> HWND {
-                return ::CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, parent, nullptr,
-                                         ::GetModuleHandleW(nullptr), nullptr);
+            // A tooltip only wraps its text, and only honours a line break in it, once told how wide it may be.
+            static constexpr auto CreateTooltip = [] [[nodiscard]] (HWND parent, const Metrics& m) noexcept -> HWND {
+                static constexpr auto Wrapped = [] [[nodiscard]] (HWND tooltip, int width) noexcept -> HWND {
+                    if (tooltip != nullptr)
+                        (void)::SendMessageW(tooltip, TTM_SETMAXTIPWIDTH, 0, width);
+                    return tooltip;
+                };
+                return Wrapped(::CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, parent,
+                                                 nullptr, ::GetModuleHandleW(nullptr), nullptr),
+                               m.Of(kTipWidth));
             };
 
             static constexpr auto CreateChild = [] [[nodiscard]] (HWND parent, const wchar_t* className, const wchar_t* text, DWORD style, DWORD extended, RECT bounds) noexcept -> HWND {
@@ -1578,7 +1588,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  IconFont(m.dpi),
                                  BoldFont(m.dpi),
                                  tabs,
-                                 tabs == nullptr ? nullptr : CreateTooltip(parent),
+                                 tabs == nullptr ? nullptr : CreateTooltip(parent, m),
                                  built.labels,
                                  built.sliders,
                                  built.boxes,
