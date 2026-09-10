@@ -1379,7 +1379,9 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     };
                     const auto steps = [&values](std::size_t f) { return StepsOf(values[f], kFields[f]); };
                     built.labels = infra::Generated<HWND, kFieldCount>(
-                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, kColumnWidth); });
+                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, LabelWidthOf(f)); });
+                    // A label stops short of the end of its line when a glyph sits there: a later child sits under an earlier one.
+                    static constexpr auto LabelWidthOf = [] [[nodiscard]] (std::size_t f) noexcept -> int { return kFields[f].warning == nullptr ? kColumnWidth : kResetOffset - kMargin; };
                     built.sliders = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateSlider(parent, m, kFields[f], PlaceOfRow(Kind::Field, f, m), steps(f)); });
                     built.boxes = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
