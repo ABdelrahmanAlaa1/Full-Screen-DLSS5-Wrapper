@@ -17,7 +17,7 @@ using ABI::Windows::Graphics::Capture::IGraphicsCaptureSession;
 using ABI::Windows::UI::WindowId;
 
 // Every step is written to a file of its own: it fails in a way that reads as success.
-constexpr wchar_t kNotesFile[] = L"dlssscreen-exclusion.log";
+constexpr wchar_t kNotesFile[] = L"FullScreenWrapperForDLSS5-exclusion.log";
 
 void Note(std::string_view line) noexcept
 {

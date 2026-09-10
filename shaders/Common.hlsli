@@ -1,4 +1,4 @@
-// Shared declarations for DlssScreen shaders.
+// Shared declarations for Full-Screen Wrapper for DLSS5 shaders.
 #ifndef DSCREEN_COMMON_HLSLI
 #define DSCREEN_COMMON_HLSLI
 

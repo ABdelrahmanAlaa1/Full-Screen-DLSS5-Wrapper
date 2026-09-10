@@ -50,7 +50,7 @@ pass, independent expected results, no invented contracts, and no silent no-op d
 | R13 Checked arithmetic | Unbounded values use `infra::CheckedAdd/Sub/Mul/Div` (compiler builtins or `intsafe.h`); everything else is a bounded type whose range is stated by its parser (`kMaxPixelCount`, `kMaxLevels`, `kMaxMonitors`, `kFrameLimit`). | Compiler (`-Wconversion`, `-Wsign-conversion`); property tests of the checked operations |
 | R14 Errors are values | Every fallible function returns `std::expected` (`infra::Result`, `infra::Status`) with an enumerated error; there is no `throw`, `try`, `catch`, `new` or throwing accessor in the code. | `noexcept` on every function; the absence of `throw`, `try` and `catch` is a source constraint |
 | R15 Two outcomes, no fallbacks | A failure stops the program with its `ApiCall` and code. Nothing substitutes for a failed operation: a missing optical-flow build, an unavailable NGX feature or an unsupported adapter is an error, not a passthrough. Running without a model is only possible through explicit options (`--nr off`, `--sr off`, `--mv none`), which the plan records and the log states. | Review; the simulator's failure injection checks that every failure variant propagates |
-| R16 Invariants are contracts, and contracts run in production | `REQUIRE`/`ENSURE` are compiled in every configuration; a violation prints the predicate and location, dumps the trace ring to `dlssscreen-trace.txt` and aborts. | `infrastructure/contracts.h`, `trace.cpp` |
+| R16 Invariants are contracts, and contracts run in production | `REQUIRE`/`ENSURE` are compiled in every configuration; a violation prints the predicate and location, dumps the trace ring to `FullScreenWrapperForDLSS5-trace.txt` and aborts. | `infrastructure/contracts.h`, `trace.cpp` |
 | R17 Every result is handled | Every non-void function is `[[nodiscard]]`; `std::expected` results are consumed by `and_then`, `transform`, `value_or` or `error_or`. | Compiler (`-Wunused-result`, MSVC C4834) on the `[[nodiscard]]` every function carries |
 | R18 Writers verify their output | `CreateTexture` re-reads the resource description; `WriteZeros` reads the mapped bytes back; every NGX parameter write is read back (`NgxParameterRoundTrip`); `Log` checks the byte count of every write and the flush. | Code; `[[nodiscard]]` on the verification result makes it impossible to drop |
 | R19 Nothing unfinished compiles | No TODO, FIXME, placeholder or stub on a shipped path. | Source constraint |
@@ -99,7 +99,7 @@ They fall into these groups:
 
 ## The gate
 
-`gate/gate.sh` (portable targets) and `gate/gate.ps1` (everything, including `DlssScreen.exe`) run:
+`gate/gate.sh` (portable targets) and `gate/gate.ps1` (everything, including `FullScreenWrapperForDLSS5.exe`) run:
 
 1. the build with warnings as errors and tracing on (IX.1, IX.3);
 2. the formatter check (`.clang-format`, IX.5);

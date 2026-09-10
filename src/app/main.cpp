@@ -88,7 +88,7 @@ struct Arguments
 
 [[nodiscard]] int ReportEarly(const Error& error) noexcept
 {
-    const Line line = infra::Formatted<kLineCapacity>("DlssScreen: {}\n", real::Describe(error).Get());
+    const Line line = infra::Formatted<kLineCapacity>("Full-Screen Wrapper for DLSS5: {}\n", real::Describe(error).Get());
     real::ShowMessage(line.Get());
     return real::WriteText(stderr, line.Get()).transform([] { return kExitFailure; }).value_or(kExitFailure);
 }
@@ -394,8 +394,8 @@ struct Ended
                             // with no such file means there is nothing to build from, a zero with the file means it was rejected.
                             static constexpr auto ZeroAvailabilityText = [] [[nodiscard]] (const std::optional<interior::DirectoryPath>& model) noexcept -> Line {
                                 if (!model.has_value())
-                                    return infra::Formatted<kLineCapacity>(
-                                        "the NGX loader reports DLSSNR.Available = 0 and there is no nvngx_dlssnr.dll next to DlssScreen.exe or in --ngx-path; put NVIDIA's DLSS 5 model there");
+                                    return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 and there is no nvngx_dlssnr.dll next to FullScreenWrapperForDLSS5.exe or in "
+                                                                           "--ngx-path; put NVIDIA's DLSS 5 model there");
                                 const std::array<char, interior::DirectoryPath::Capacity + 1> directory = infra::NarrowedChars<interior::DirectoryPath::Capacity + 1>(model->Get());
                                 return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 although nvngx_dlssnr.dll is in {}; the loader rejected that build, see nvngx.log",
                                                                        directory.data());

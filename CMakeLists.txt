@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(DlssScreen VERSION 0.2.0 LANGUAGES CXX)
+project(FullScreenWrapperForDLSS5 VERSION 0.2.0 LANGUAGES CXX)
 
 # Layout (see COMPLIANCE.md):
 #   src/infrastructure  generic primitives, contracts, tracing (the only metaprogramming)

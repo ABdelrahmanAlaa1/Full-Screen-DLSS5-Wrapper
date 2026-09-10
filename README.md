@@ -1,6 +1,7 @@
-# DlssScreen
+# Full-Screen Wrapper for DLSS5
 
-DlssScreen applies **DLSS 5 Neural Rendering** (NGX feature 18, `nvngx_dlssnr.dll`) to the live desktop.
+This is an unofficial tool, not an NVIDIA product and not an official DLSS 5 implementation. It applies
+**DLSS 5 Neural Rendering** (NGX feature 18, `nvngx_dlssnr.dll`) to the live desktop.
 It captures the composited screen with Windows Graphics Capture, runs the model on its own Direct3D 12
 device and presents the result in its own borderless, topmost, click-through window that is excluded
 from capture, so the picture never feeds back into itself. Optionally DLSS Super Resolution (feature 1)
@@ -23,7 +24,7 @@ with mutation testing, build-applied call tracing, and contracts that run in pro
 ## This is not what DLSS 5 looks like in a game
 
 A game hands the model its own motion vectors, its own depth buffer and the sub-pixel jitter it rendered
-with, frame by frame, before anything is composited. DlssScreen has none of that. It captures the finished
+with, frame by frame, before anything is composited. This tool has none of that. It captures the finished
 desktop and makes substitutes: one flat depth plane, and motion guessed by matching blocks between two
 pictures that have already been drawn, resized and blended by the window manager.
 
@@ -59,9 +60,9 @@ otherwise. Restoring the window does not take it back: drag the crosshair onto i
 ## The model file
 
 `nvngx_dlssnr.dll` is NVIDIA's, is not in this repository, and is not in the build artifact. Put it next to
-`DlssScreen.exe` or point `--ngx-path` at the folder that holds it.
+`FullScreenWrapperForDLSS5.exe` or point `--ngx-path` at the folder that holds it.
 
-Because the NGX loader picks that file up by name from a folder anyone can write to, DlssScreen checks it
+Because the NGX loader picks that file up by name from a folder anyone can write to, this tool checks it
 before the loader gets there: Windows must accept its Authenticode signature, and the signing certificate
 must name NVIDIA. A file that fails stops the session. The file is then held open, shared for reading only,
 for as long as the session runs, so it cannot be written to, deleted or renamed afterwards — the file that
@@ -73,13 +74,13 @@ before the check, and it says nothing about a model loaded from anywhere else.
 - Windows 10 2004 or newer (Windows Graphics Capture, DirectComposition), Windows 11 recommended.
 - An NVIDIA RTX GPU with driver **616.64 or newer** for neural rendering. 616.64 is the first driver
   whose NGX loader offers DLSS 5 (feature 18) itself; on 616.56 and older the loader answers
-  `NotImplemented` to the requirements query and cannot build the feature, and DlssScreen stops at
+  `NotImplemented` to the requirements query and cannot build the feature, and this tool stops at
   start-up with a message naming the installed and the required driver.
 - The [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) (`lib/Windows_x86_64/x64/nvsdk_ngx_s.lib`, `include/`, `lib/Windows_x86_64/rel/nvngx_dlss.dll`).
-- NVIDIA's DLSS 5 model, `nvngx_dlssnr.dll`, next to `DlssScreen.exe` or in the folder given by
+- NVIDIA's DLSS 5 model, `nvngx_dlssnr.dll`, next to `FullScreenWrapperForDLSS5.exe` or in the folder given by
   `--ngx-path`. NGX looks for feature DLLs in the application folder and the listed paths, the way
-  games ship `nvngx_dlss.dll`; the driver does not install this one and DlssScreen does not ship it.
-  Without it the loader reports `DLSSNR.Available = 0` and DlssScreen stops with a message saying so.
+  games ship `nvngx_dlss.dll`; the driver does not install this one and this tool does not ship it.
+  Without it the loader reports `DLSSNR.Available = 0` and this tool stops with a message saying so.
 - Visual Studio 2022 17.8+ (MSVC 19.38), CMake 3.21+, Ninja or MSBuild, the Windows 10 SDK (dxc.exe).
 - Optional: the NVIDIA Optical Flow SDK for the hardware motion-vector backend (`-DDSCREEN_ENABLE_NVOF=ON`).
 
@@ -159,7 +160,7 @@ windows hidden, which is what the tool did before there was another way.
 The desktop is not a game engine, and five settings have nothing to act on because of it. The **depth
 plane** is one constant value for every pixel, which tells the model nothing about what stands in front of
 what, so its value and **depth is inverted** both make no difference. **UI correction** is passed to the
-model, but the model reads it from a UI layer DlssScreen never binds. **Optical flow grid** and **optical
+model, but the model reads it from a UI layer this tool never binds. **Optical flow grid** and **optical
 flow effort** configure NVIDIA's hardware flow engine, which the shipped build leaves out.
 
 All five are still there, on an **Inert** page that `--show-inert on` adds. Without it they are off the
@@ -174,10 +175,10 @@ of its own, and only the last is shown. It exists to see what the model makes of
 use: every pass costs the whole model again and holds the picture back by as much.
 
 ```
-DlssScreen.exe                       # neural rendering on the primary monitor
-DlssScreen.exe --monitor 1 --target 0  # capture monitor 1, upscale with DLSS and present on monitor 0
-DlssScreen.exe --list-monitors
-DlssScreen.exe --help
+FullScreenWrapperForDLSS5.exe                       # neural rendering on the primary monitor
+FullScreenWrapperForDLSS5.exe --monitor 1 --target 0  # capture monitor 1, upscale with DLSS and present on monitor 0
+FullScreenWrapperForDLSS5.exe --list-monitors
+FullScreenWrapperForDLSS5.exe --help
 ```
 
 Hotkeys (global): `Ctrl+Alt+Shift+O` original/processed, `Ctrl+Alt+Shift+C` split view, `Ctrl+Alt+Shift+Q` quit.
@@ -185,23 +186,23 @@ Hotkeys (global): `Ctrl+Alt+Shift+O` original/processed, `Ctrl+Alt+Shift+C` spli
 Every failure stops the program with a message and a non-zero exit code. There are no silent fallbacks:
 if neural rendering is requested and unavailable, the tool exits instead of running as a passthrough
 (pass `--nr off` or `--sr off` to run without a model). A contract violation aborts and writes the call
-trace ring to `dlssscreen-trace.txt` next to the working directory.
+trace ring to `FullScreenWrapperForDLSS5-trace.txt` next to the working directory.
 
 ## What the model does with these values
 
-The 310.8 model carries a single set of weights, under preset 1, which is what DlssScreen asks for; any
+The 310.8 model carries a single set of weights, under preset 1, which is what this tool asks for; any
 other number falls back to it and says so in the NGX log. Style takes 0, 1 or 2 and is clamped by the
-model itself. The strengths are unbounded floats: the model applies no limit of its own, so DlssScreen
+model itself. The strengths are unbounded floats: the model applies no limit of its own, so this tool
 imposes none either, though the values it was authored around sit between 0 and 1. Skin structure and
 local structure only do anything while auto mask is on, and UI correction reads a UI layer that
-DlssScreen does not supply, so it is inert as wired. The model runs one-to-one and does no scaling; any
+this tool does not supply, so it is inert as wired. The model runs one-to-one and does no scaling; any
 resizing comes from the separate super resolution pass.
 
 The motion scales (`--mv-scale-x`, `--mv-scale-y`) are what the model multiplies the motion vectors by.
 Left out, each is the ratio between the model's working size and the captured one, which is what the
 synthesised vectors are measured in; given, the operator's number is used instead, and a negative one
 flips that axis. `--depth-inverted` tells the model the depth plane counts the other way, which with one
-flat plane changes little. None of these carries a range, so DlssScreen imposes none.
+flat plane changes little. None of these carries a range, so this tool imposes none.
 
 ## How it works
 

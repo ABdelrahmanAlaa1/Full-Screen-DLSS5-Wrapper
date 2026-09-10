@@ -4,9 +4,9 @@ namespace interior {
 
 std::string_view UsageText() noexcept
 {
-    return "DlssScreen - DLSS 5 Neural Rendering for the live desktop\n"
+    return "Full-Screen Wrapper for DLSS5 - DLSS 5 Neural Rendering for the live desktop\n"
            "\n"
-           "Usage: DlssScreen.exe [options]\n"
+           "Usage: FullScreenWrapperForDLSS5.exe [options]\n"
            "\n"
            "Capture and output\n"
            "  --list-monitors            List monitors and exit\n"
@@ -40,7 +40,7 @@ std::string_view UsageText() noexcept
            "                             nothing while --nr-automask is off\n"
            "  --nr-automask on|off       Let the model detect skin itself (default on)\n"
            "  --nr-ui-correction on|off  Model UI correction (default on). The model reads a UI layer that\n"
-           "                             DlssScreen does not give it, so this is inert as wired\n"
+           "                             this app does not give it, so this is inert as wired\n"
            "  --nr-passes N              Run the model on its own output N times a frame (default 1).\n"
            "                             Each pass runs the whole model again, with a history of its own, on\n"
            "                             the picture the pass before it made: three passes cost three times\n"

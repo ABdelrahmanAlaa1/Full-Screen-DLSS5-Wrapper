@@ -70,7 +70,7 @@ Result<Console, Error> OpenConsole(interior::LogLevel minimum, const interior::D
 void ShowMessage(std::string_view text) noexcept
 {
     const infra::BoundedString<char, kMessageCapacity> message = infra::BoundedString<char, kMessageCapacity>::Parse(text).value_or(infra::BoundedString<char, kMessageCapacity>{});
-    ::MessageBoxA(nullptr, message.CString(), "DlssScreen", MB_OK | MB_ICONERROR);
+    ::MessageBoxA(nullptr, message.CString(), "Full-Screen Wrapper for DLSS5", MB_OK | MB_ICONERROR);
 }
 
 Status<Error> Log(const Console& console, interior::LogLevel level, std::string_view text) noexcept

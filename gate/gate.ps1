@@ -1,4 +1,4 @@
-# The gate (IX) on Windows: builds everything including DlssScreen.exe with warnings as errors and
+# The gate (IX) on Windows: builds everything including FullScreenWrapperForDLSS5.exe with warnings as errors and
 # tracing, runs the formatter check, then the optional verification that exists here: the property
 # tests, mutation testing and the lock check.
 # Usage: pwsh gate/gate.ps1 -DlssSdkDir C:\DLSS [-NvofSdkDir C:\NVOF] [-Mutants 40]

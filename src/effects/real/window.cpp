@@ -22,7 +22,7 @@ using infra::Status;
 using interior::MonitorInfo;
 using interior::MonitorList;
 
-constexpr wchar_t kClassName[] = L"DlssScreenOutputWindow";
+constexpr wchar_t kClassName[] = L"FullScreenWrapperForDLSS5OutputWindow";
 constexpr std::uint32_t kMaxMessagesPerPump = 64;
 
 [[nodiscard]] LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
@@ -352,7 +352,7 @@ Result<OutputWindow, Error> CreateOutputWindow(const interior::ScreenRect& rect,
             static constexpr auto RedirectionStyle = [] [[nodiscard]] (const WindowSettings& s) noexcept -> DWORD { return s.redirectionBitmap ? 0u : WS_EX_NOREDIRECTIONBITMAP; };
             return WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | TopmostStyle(s) | ClickThroughStyle(s) | RedirectionStyle(s);
         };
-        HWND handle = ::CreateWindowExW(ExtendedStyle(s), kClassName, L"DlssScreen", WS_POPUP, rect.Left().Get(), rect.Top().Get(), Width(rect), Height(rect), nullptr, nullptr,
+        HWND handle = ::CreateWindowExW(ExtendedStyle(s), kClassName, L"Full-Screen Wrapper for DLSS5", WS_POPUP, rect.Left().Get(), rect.Top().Get(), Width(rect), Height(rect), nullptr, nullptr,
                                         ::GetModuleHandleW(nullptr), nullptr);
         if (handle == nullptr)
             return Fail(LastError(ApiCall::CreateWindowExW));

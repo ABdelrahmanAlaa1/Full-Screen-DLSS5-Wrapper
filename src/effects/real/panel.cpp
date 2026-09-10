@@ -22,9 +22,9 @@ namespace {
 using infra::Fail;
 using infra::Result;
 
-constexpr wchar_t kPanelClass[] = L"DlssScreenControlPanel";
-constexpr wchar_t kCrosshairClass[] = L"DlssScreenWindowPicker";
-constexpr wchar_t kOutlineClass[] = L"DlssScreenPickOutline";
+constexpr wchar_t kPanelClass[] = L"FullScreenWrapperForDLSS5ControlPanel";
+constexpr wchar_t kCrosshairClass[] = L"FullScreenWrapperForDLSS5WindowPicker";
+constexpr wchar_t kOutlineClass[] = L"FullScreenWrapperForDLSS5PickOutline";
 constexpr int kCrosshairWidth = 34;
 constexpr int kReferenceDpi = 96;
 // The longest text a control shows is a window's title. A write is skipped only when all of it reads back,
@@ -127,7 +127,7 @@ constexpr std::array<ToggleSpec, kToggleCount> kToggles{ {
     { L"Skin follows local structure",
       L"Give skin whatever local structure is given, which is what the model reads -1 as. It is the only value between -1 and 0 that means anything, so it is a switch rather than part of the slider.",
       true },
-    { L"UI correction", L"Ask the model to leave interface pixels alone. The model reads this from a UI layer DlssScreen never binds, so it does nothing either way.", true },
+    { L"UI correction", L"Ask the model to leave interface pixels alone. The model reads this from a UI layer this app never binds, so it does nothing either way.", true },
     { L"Depth is inverted", L"Tell the model the depth plane counts the other way. The plane is one constant, and a constant read backwards is the same constant, so this does nothing.", true },
     { L"Vsync", L"Present in step with the monitor. Off presents as fast as the pipeline allows, which tears.", true },
     { L"Capture border", L"Let Windows draw its yellow border around what is being captured.", true },
@@ -1199,8 +1199,8 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
     };
 
     static constexpr auto CreatePanelWindow = [] [[nodiscard]] () noexcept -> Result<UniqueWindow, Error> {
-        HWND window = ::CreateWindowExW(WS_EX_TOPMOST, kPanelClass, L"DlssScreen controls", kPanelStyle, CW_USEDEFAULT, CW_USEDEFAULT, kPanelWidth, kPanelWidth, nullptr, nullptr,
-                                        ::GetModuleHandleW(nullptr), nullptr);
+        HWND window = ::CreateWindowExW(WS_EX_TOPMOST, kPanelClass, L"Full-Screen Wrapper for DLSS5 \u2014 controls", kPanelStyle, CW_USEDEFAULT, CW_USEDEFAULT, kPanelWidth, kPanelWidth, nullptr,
+                                        nullptr, ::GetModuleHandleW(nullptr), nullptr);
         if (window == nullptr)
             return Fail(LastError(ApiCall::CreateWindowExW));
         return UniqueWindow(window);

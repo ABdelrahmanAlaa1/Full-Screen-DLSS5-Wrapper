@@ -48,7 +48,7 @@ dscreen_compile_shader(Match.hlsl      CS_Finalize   cs_6_0 FinalizeCS)
 dscreen_compile_shader(FlowToMv.hlsl   CS_FlowToMv   cs_6_0 FlowToMvCS)
 dscreen_compile_shader(Blit.hlsl       VS_Blit       vs_6_0 BlitVS)
 dscreen_compile_shader(Blit.hlsl       PS_Blit       ps_6_0 BlitPS)
-add_custom_target(DlssScreenShaders DEPENDS ${DSCREEN_SHADER_HEADERS})
+add_custom_target(FullScreenWrapperForDLSS5Shaders DEPENDS ${DSCREEN_SHADER_HEADERS})
 
 set(DSCREEN_REAL_SOURCES
   src/effects/real/com.cpp
@@ -75,27 +75,27 @@ if(DSCREEN_ENABLE_NVOF)
   list(APPEND DSCREEN_REAL_SOURCES src/effects/real/nvof.cpp)
 endif()
 
-add_executable(DlssScreen ${DSCREEN_REAL_SOURCES})
-add_dependencies(DlssScreen DlssScreenShaders)
-target_include_directories(DlssScreen PRIVATE "${CMAKE_BINARY_DIR}/generated" "${NGX_INCLUDE_DIR}")
-target_compile_definitions(DlssScreen PRIVATE DSCREEN_VERSION_STRING="${PROJECT_VERSION}")
+add_executable(FullScreenWrapperForDLSS5 ${DSCREEN_REAL_SOURCES})
+add_dependencies(FullScreenWrapperForDLSS5 FullScreenWrapperForDLSS5Shaders)
+target_include_directories(FullScreenWrapperForDLSS5 PRIVATE "${CMAKE_BINARY_DIR}/generated" "${NGX_INCLUDE_DIR}")
+target_compile_definitions(FullScreenWrapperForDLSS5 PRIVATE DSCREEN_VERSION_STRING="${PROJECT_VERSION}")
 if(DSCREEN_ENABLE_NVOF)
-  target_include_directories(DlssScreen PRIVATE "${NVOF_INCLUDE_DIR}")
-  target_compile_definitions(DlssScreen PRIVATE DSCREEN_HAVE_NVOF=1)
+  target_include_directories(FullScreenWrapperForDLSS5 PRIVATE "${NVOF_INCLUDE_DIR}")
+  target_compile_definitions(FullScreenWrapperForDLSS5 PRIVATE DSCREEN_HAVE_NVOF=1)
 else()
-  target_compile_definitions(DlssScreen PRIVATE DSCREEN_HAVE_NVOF=0)
+  target_compile_definitions(FullScreenWrapperForDLSS5 PRIVATE DSCREEN_HAVE_NVOF=0)
 endif()
-target_link_libraries(DlssScreen PRIVATE dscreen_core dscreen_trace_flags dscreen_stack
+target_link_libraries(FullScreenWrapperForDLSS5 PRIVATE dscreen_core dscreen_trace_flags dscreen_stack
   "$<IF:$<CONFIG:Debug>,${NGX_LIBRARY_DEBUG},${NGX_LIBRARY_RELEASE}>"
   d3d12 dxgi d3d11 dcomp dwmapi dxguid user32 gdi32 comctl32 shcore shell32 ole32 runtimeobject wintrust crypt32)
 # The windows subsystem so a double-click opens no console; mainCRTStartup keeps the ordinary entry point,
 # and the program attaches to the console it was launched from when there is one. The manifest dependency
 # asks for version 6 of the common controls, which is what the panel's sliders and checkboxes come from.
-target_link_options(DlssScreen PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /MAP
+target_link_options(FullScreenWrapperForDLSS5 PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /MAP
   "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'")
 
 file(GLOB _ngx_dlls "${DLSS_SDK_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll" "${DLSS_SDK_DIR}/lib/Windows_x86_64/nvngx_dlss.dll")
 foreach(_dll IN LISTS _ngx_dlls)
-  add_custom_command(TARGET DlssScreen POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_dll}" "$<TARGET_FILE_DIR:DlssScreen>")
+  add_custom_command(TARGET FullScreenWrapperForDLSS5 POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_dll}" "$<TARGET_FILE_DIR:FullScreenWrapperForDLSS5>")
 endforeach()
-install(TARGETS DlssScreen RUNTIME DESTINATION .)
+install(TARGETS FullScreenWrapperForDLSS5 RUNTIME DESTINATION .)
