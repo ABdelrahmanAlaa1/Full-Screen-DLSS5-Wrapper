@@ -53,14 +53,14 @@ constexpr int kTipWidth = 360; // a hint wraps at this rather than running on in
 constexpr int kListChoiceWidth = 186;
 constexpr std::size_t kListPerLine = 2;
 constexpr wchar_t kChevronGlyph[] = L"\uE70D";
-constexpr wchar_t kNoticeLine[] = L"NOTICE: this is not representative of a native DLSS 5 implementation";
+constexpr wchar_t kNoticeLine[] = L"NOTICE: A game with \"True\" native DLSS5 will likely look different (expand for details)";
 constexpr wchar_t kNoticeBody[] =
-    L"A game hands the model its own motion vectors, its own depth buffer and the sub-pixel jitter it rendered with, frame by frame, before anything is composited. DlssScreen has none of "
+    L"This app simply takes a flat video stream input and passes it to the model. A native game would provide additional data such as motion data, object depth data, etc.\r\n\r\n",
+    L"A game hands the model its own motion vectors, its own depth buffer and the sub-pixel jitter it rendered with, frame by frame, before anything is composited. This app has none of "
     L"that. It captures the finished desktop and makes substitutes: one flat depth plane, and motion guessed by matching blocks between two pictures that have already been drawn, "
     L"resized and blended by the window manager.\r\n\r\n"
-    L"So the model here is working from worse inputs than it was built for, on an image that has already lost the information it wants. What it does to the desktop is not what it does in a "
-    L"game, and neither is what it costs: the capture, the matching and the extra copies are all work a game would not be doing, and none of it is part of DLSS.\r\n\r\n"
-    L"Judge DLSS 5 by a game that implements it. This is a way to see the model run on something it was never given, not a preview of what it does when it is used properly.";
+    L"So the model here is working from worse inputs than it was built for, on an image that has already lost the information it wants. What it does to the desktop is not what it does in a game.\r\n\r\n"
+    L"This should be considered an experimental demo, NOT a preview of what it does when it is used properly.";
 constexpr int kNoticeLines = 9;
 constexpr int kExpanderWidth = 28;
 
