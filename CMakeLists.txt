@@ -35,7 +35,9 @@ if(MSVC)
     target_compile_options(dscreen_flags INTERFACE /MP) # MSBuild compiles a project's files one at a time otherwise
   endif()
 else()
-  target_compile_options(dscreen_flags INTERFACE -Wall -Wextra -Wpedantic -Werror -Wshadow -Wconversion -Wsign-conversion -Wswitch-enum -Wunused-result -Wcast-align -Wnull-dereference -Wdouble-promotion -Wimplicit-fallthrough)
+  # No -Wshadow: a nested helper's parameters share names with the function around it by design, and as
+  # captureless lambdas they cannot reach what they shadow; GCC builds only the portable half, for the tests.
+  target_compile_options(dscreen_flags INTERFACE -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -Wswitch-enum -Wunused-result -Wcast-align -Wnull-dereference -Wdouble-promotion -Wimplicit-fallthrough)
   if(DSCREEN_SANITIZE)
     target_compile_options(dscreen_flags INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(dscreen_flags INTERFACE -fsanitize=address,undefined)
