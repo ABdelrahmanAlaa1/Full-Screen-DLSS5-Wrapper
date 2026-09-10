@@ -2,6 +2,6 @@ build*/
 out/
 .vs/
 .cache/
-FullScreenWrapperForDLSS5-trace.txt
+*-trace.txt
 *.log
 __pycache__/
