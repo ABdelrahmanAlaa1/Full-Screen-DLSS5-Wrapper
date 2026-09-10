@@ -98,19 +98,19 @@ struct Building
         });
     };
 
-    static constexpr auto Holding = [] [[nodiscard]] (Passes so, std::size_t at, Feature feature) noexcept -> Passes {
-        so[at] = std::move(feature); // WAIVER(R2): the array is this call's own, filled at one slot and handed back.
+    static constexpr auto Holding = [] [[nodiscard]] (Passes so, Feature feature) noexcept -> Passes {
+        so.push_back(std::move(feature)); // WAIVER(R2): the list is this call's own, grown by one and handed back.
         return so;
     };
 
-    static constexpr auto WithPass = [] [[nodiscard]] (const Gpu& gpu, const NgxRuntime& runtime, const SessionPlan& plan, const interior::NrTuning& tuning, Building so,
-                                                       std::uint32_t pass) noexcept -> Result<Building, Error> {
-        return BuiltPassOf(gpu, runtime, plan, tuning, so.fence).transform([&](BuiltPass built) { return Building{ Holding(std::move(so.passes), pass, std::move(built.feature)), built.fence }; });
+    static constexpr auto WithPass = [] [[nodiscard]] (const Gpu& gpu, const NgxRuntime& runtime, const SessionPlan& plan, const interior::NrTuning& tuning,
+                                                       Building so) noexcept -> Result<Building, Error> {
+        return BuiltPassOf(gpu, runtime, plan, tuning, so.fence).transform([&](BuiltPass built) { return Building{ Holding(std::move(so.passes), std::move(built.feature)), built.fence }; });
     };
     REQUIRE(c.models.runtime.has_value());
     const NgxRuntime& runtime = *c.models.runtime;
     return infra::FoldOwned(std::views::iota(std::uint32_t{ 0 }, wanted.passes.Get()), Result<Building, Error>(Building{ Passes{}, c.fence }),
-                            [&](Building so, std::uint32_t pass) { return WithPass(gpu, runtime, plan, wanted.tuning, std::move(so), pass); })
+                            [&](Building so, std::uint32_t) { return WithPass(gpu, runtime, plan, wanted.tuning, std::move(so)); })
         .transform([&](Building built) { return Created{ Models{ std::move(c.models.runtime), std::move(c.models.superResolution), std::move(built.passes), wanted }, built.fence }; });
 }
 

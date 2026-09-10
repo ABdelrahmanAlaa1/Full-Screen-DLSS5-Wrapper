@@ -9,6 +9,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 
 #if DSCREEN_HAVE_NVOF
 #include "effects/real/nvof.h"
@@ -34,8 +35,9 @@ struct BuiltModel
     [[nodiscard]] friend constexpr bool operator==(const BuiltModel&, const BuiltModel&) noexcept = default;
 };
 
-// One instance of the model per pass, each with a history of its own, and nothing past the count built.
-using Passes = std::array<Feature, interior::kMaxPasses>;
+// One instance of the model per pass, each with a history of its own, as many as the operator asks for: the
+// GPU's memory is the bound, and an instance it cannot hold fails to build and says so.
+using Passes = std::vector<Feature>;
 
 struct Models
 {

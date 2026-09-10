@@ -3,6 +3,7 @@
 #include "infrastructure/fold.h"
 #include "infrastructure/overloaded.h"
 
+#include <algorithm>
 #include <bit>
 #include <ranges>
 #include <span>
@@ -177,11 +178,66 @@ Result<interior::FenceValue, Error> ExecuteSteps(const Gpu& gpu, const FrameCont
                 .transform([&c] { return c; });
         };
 
+        // The passes hand each other two intermediate pictures in turn: what one writes the next reads, the first
+        // reads the picture and the last writes the output. Both intermediates are found writable and left so.
         static constexpr auto RecordNeuralRendering = [] [[nodiscard]] (const Gpu& gpu, const interior::EvaluateNr& e, const Cursor& c) noexcept -> StepResult {
+            static constexpr auto Intermediate = [] [[nodiscard]] (std::uint32_t pass) noexcept -> interior::ResourceId {
+                const Result<interior::SetIndex, interior::UnitError> set = interior::SetIndexTag::Parse(pass % 2);
+                ENSURE(set.has_value());
+                return interior::NrPassId(*set);
+            };
+
+            static constexpr auto IsLast = [] [[nodiscard]] (const interior::EvaluateNr& e, std::uint32_t pass) noexcept -> bool { return pass + 1 == e.passes.Get(); };
+
+            static constexpr auto InputOf = [] [[nodiscard]] (const interior::EvaluateNr& e, std::uint32_t pass) noexcept -> interior::ResourceId {
+                return pass == 0 ? e.io.color : Intermediate(pass - 1);
+            };
+
+            static constexpr auto OutputOf = [] [[nodiscard]] (const interior::EvaluateNr& e, std::uint32_t pass) noexcept -> interior::ResourceId {
+                return IsLast(e, pass) ? e.io.output : Intermediate(pass);
+            };
+
+            static constexpr auto WithIo = [] [[nodiscard]] (const interior::EvaluateNr& e, const interior::ResourceId& color, const interior::ResourceId& output) noexcept -> interior::EvaluateNr {
+                return interior::EvaluateNr{
+                    interior::ModelIo{ color, e.io.depth, e.io.motionVectors, output }, e.work, e.guide, e.mvScaleX, e.mvScaleY, e.reset, e.depthInverted, e.tuning, e.passes
+                };
+            };
+
+            static constexpr auto Moved = [] [[nodiscard]] (const Gpu& gpu, const interior::ResourceId& id, interior::ResourceState from, interior::ResourceState to) noexcept -> infra::Status<Error> {
+                return Lookup(gpu.resources, id).transform([&](ID3D12Resource* resource) { RecordBarrier(gpu.list.Get(), resource, from, to); });
+            };
+
+            // What the pass before wrote is read from now, and what this pass writes was read by the one before it, when
+            // there was one that far back.
+            static constexpr auto Handed = [] [[nodiscard]] (const Gpu& gpu, std::uint32_t pass) noexcept -> infra::Status<Error> {
+                static constexpr auto ReusedIfAny = [] [[nodiscard]] (const Gpu& gpu, std::uint32_t pass) noexcept -> infra::Status<Error> {
+                    if (pass < 2)
+                        return {};
+                    return Moved(gpu, Intermediate(pass), interior::ResourceState::ShaderRead, interior::ResourceState::UnorderedAccess);
+                };
+                if (pass == 0)
+                    return {};
+                return Moved(gpu, Intermediate(pass - 1), interior::ResourceState::UnorderedAccess, interior::ResourceState::ShaderRead).and_then([&] { return ReusedIfAny(gpu, pass); });
+            };
+
+            static constexpr auto RecordPass = [] [[nodiscard]] (const Gpu& gpu, const interior::EvaluateNr& e, std::uint32_t pass) noexcept -> infra::Status<Error> {
+                REQUIRE(pass < gpu.models.neuralRendering.size());
+                return Handed(gpu, pass).and_then([&] {
+                    return EvaluateNeuralRendering(*gpu.models.runtime, gpu.models.neuralRendering[pass], gpu.list.Get(), e.tuning, WithIo(e, InputOf(e, pass), OutputOf(e, pass)), gpu.resources);
+                });
+            };
+
+            // Every intermediate written is read by the next pass, so each that was used is left readable: the first
+            // from two passes, the second from three. Both are put back the way they were found.
+            static constexpr auto Restored = [] [[nodiscard]] (const Gpu& gpu, const interior::EvaluateNr& e) noexcept -> infra::Status<Error> {
+                const std::uint32_t used = std::min(e.passes.Get() - 1, 2u);
+                return infra::ForEach(std::views::iota(std::uint32_t{ 0 }, used), infra::Status<Error>{},
+                                      [&](std::uint32_t k) { return Moved(gpu, Intermediate(k), interior::ResourceState::ShaderRead, interior::ResourceState::UnorderedAccess); });
+            };
             REQUIRE(gpu.models.runtime.has_value());
-            const Feature& feature = gpu.models.neuralRendering[e.pass.Get()];
-            REQUIRE(feature != nullptr);
-            return EvaluateNeuralRendering(*gpu.models.runtime, feature, gpu.list.Get(), e.tuning, e, gpu.resources).transform([&c] { return c; });
+            return infra::ForEach(std::views::iota(std::uint32_t{ 0 }, e.passes.Get()), infra::Status<Error>{}, [&](std::uint32_t pass) { return RecordPass(gpu, e, pass); })
+                .and_then([&] { return Restored(gpu, e); })
+                .transform([&c] { return c; });
         };
 
         static constexpr auto RecordDraw = [] [[nodiscard]] (const Gpu& gpu, interior::FrameSlot slot, const interior::Draw& d, const Cursor& c) noexcept -> StepResult {

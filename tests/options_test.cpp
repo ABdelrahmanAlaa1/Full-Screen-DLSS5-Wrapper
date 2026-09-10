@@ -76,21 +76,19 @@ constexpr std::array<std::wstring_view, 12> kVocabulary{ L"--monitor", L"all",  
     return !ParseOptions(above).has_value() && !ParseOptions(below).has_value() && ParseOptions(ends).has_value();
 }
 
-[[nodiscard]] bool PassesAcceptOneToTheMost(infra::RngState& rng) noexcept
+[[nodiscard]] bool PassesAcceptAnyCountFromOne(infra::RngState& rng) noexcept
 {
-    const std::uint32_t passes = 1 + proptest::DrawBelow(rng, kMaxPasses);
+    const std::uint32_t passes = 1 + proptest::DrawBelow(rng, 100000);
     const std::wstring joined = L"--nr-passes=" + std::to_wstring(passes);
     const std::array<std::wstring_view, 1> real{ joined };
     const auto parsed = ParseOptions(real);
     return parsed.has_value() && parsed->nrPasses.Get() == passes;
 }
 
-[[nodiscard]] bool PassesRefuseZeroAndPastTheMost(infra::RngState&) noexcept
+[[nodiscard]] bool PassesRefuseZero(infra::RngState&) noexcept
 {
-    const std::wstring past = L"--nr-passes=" + std::to_wstring(kMaxPasses + 1);
     const std::array<std::wstring_view, 1> zero{ L"--nr-passes=0" };
-    const std::array<std::wstring_view, 1> beyond{ past };
-    return !ParseOptions(zero).has_value() && !ParseOptions(beyond).has_value();
+    return !ParseOptions(zero).has_value();
 }
 
 // The strengths have no such end, and every finite value is the operator's to choose.
@@ -252,8 +250,8 @@ std::uint32_t OptionsSuite(std::uint64_t seed) noexcept
     failures += Failures(proptest::ForAll("--monitor N round-trips", seed, 200, MonitorIndexRoundTrips));
     failures += Failures(proptest::ForAll("--nr-intensity accepts its whole range", seed, 300, IntensityAcceptsItsWholeRange));
     failures += Failures(proptest::ForAll("--nr-intensity refuses what is outside it", seed, 1, IntensityRefusesWhatIsOutsideIt));
-    failures += Failures(proptest::ForAll("--nr-passes accepts one to the most", seed, 100, PassesAcceptOneToTheMost));
-    failures += Failures(proptest::ForAll("--nr-passes refuses zero and past the most", seed, 1, PassesRefuseZeroAndPastTheMost));
+    failures += Failures(proptest::ForAll("--nr-passes accepts any count from one", seed, 100, PassesAcceptAnyCountFromOne));
+    failures += Failures(proptest::ForAll("--nr-passes refuses zero", seed, 1, PassesRefuseZero));
     failures += Failures(proptest::ForAll("--nr-local-tone accepts every finite value", seed, 300, StrengthAcceptsEveryFiniteValue));
     failures += Failures(proptest::ForAll("--nr-intensity refuses what is not a number", seed, 1, IntensityRefusesWhatIsNotANumber));
     failures += Failures(proptest::ForAll("--mv-scale-x accepts every finite value", seed, 300, MotionScaleAcceptsEveryFiniteValue));

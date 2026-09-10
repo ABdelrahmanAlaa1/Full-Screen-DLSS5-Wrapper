@@ -25,8 +25,7 @@ enum class UnitError : std::uint8_t {
     ScaleOutOfRange,
     LevelOutOfRange,
     LevelCountOutOfRange,
-    PassCountOutOfRange,
-    PassIndexOutOfRange,
+    PassCountZero,
     PresetOutOfRange,
     SlotOutOfRange,
     BackBufferOutOfRange,
@@ -39,7 +38,6 @@ constexpr std::uint32_t kMaxPixelCount = 16384;
 constexpr std::int32_t kMaxCoordinate = 65536;
 constexpr std::uint32_t kMaxMonitors = 16;
 constexpr std::uint32_t kMaxLevels = 8;
-constexpr std::uint32_t kMaxPasses = 32;       // how many times a frame the model may be run on its own output; each is an instance of the model
 constexpr std::uint32_t kShippedNgxPreset = 1; // the only preset in the 310.8 model; others fall back to it
 constexpr std::uint32_t kMaxSrPreset = 15;
 constexpr std::uint32_t kDescriptorsPerFrame = 512;
@@ -206,23 +204,13 @@ private:
 };
 
 // How many times a frame the model runs, each pass on the picture the one before it made: one is the
-// model as it is meant to run, and every further pass runs the whole of it again.
+// model as it is meant to run, and every further pass runs the whole of it again. There is no top; the GPU
+// that cannot hold another instance of the model says so.
 struct PassCountTag;
 using PassCount = infra::Strong<std::uint32_t, PassCountTag>;
 struct PassCountTag
 {
     [[nodiscard]] static constexpr Result<PassCount, UnitError> Parse(std::uint32_t raw) noexcept;
-
-private:
-    [[nodiscard]] static constexpr Result<PassCount, UnitError> ParseNonZero(std::uint32_t raw) noexcept;
-};
-
-// Which of those passes a step is, counted from the one that reads the picture.
-struct PassIndexTag;
-using PassIndex = infra::Strong<std::uint32_t, PassIndexTag>;
-struct PassIndexTag
-{
-    [[nodiscard]] static constexpr Result<PassIndex, UnitError> Parse(std::uint32_t raw) noexcept;
 };
 
 struct NgxPresetTag;
@@ -517,25 +505,11 @@ constexpr Result<LevelCount, UnitError> LevelCountTag::Parse(std::uint32_t raw) 
     return ParseNonZero(raw);
 }
 
-constexpr Result<PassCount, UnitError> PassCountTag::ParseNonZero(std::uint32_t raw) noexcept
-{
-    if (raw > kMaxPasses)
-        return infra::Fail(UnitError::PassCountOutOfRange);
-    return PassCount(raw);
-}
-
 constexpr Result<PassCount, UnitError> PassCountTag::Parse(std::uint32_t raw) noexcept
 {
     if (IsZero(raw))
-        return infra::Fail(UnitError::PassCountOutOfRange);
-    return ParseNonZero(raw);
-}
-
-constexpr Result<PassIndex, UnitError> PassIndexTag::Parse(std::uint32_t raw) noexcept
-{
-    if (raw >= kMaxPasses)
-        return infra::Fail(UnitError::PassIndexOutOfRange);
-    return PassIndex(raw);
+        return infra::Fail(UnitError::PassCountZero);
+    return PassCount(raw);
 }
 
 // The model resolves a preset it does not carry to the one it ships with and says so in its log, so a

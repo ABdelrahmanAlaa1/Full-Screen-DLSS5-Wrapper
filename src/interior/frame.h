@@ -126,7 +126,7 @@ struct EvaluateNr
     bool reset;
     bool depthInverted;
     NrTuning tuning;
-    PassIndex pass; // which of the model's instances runs this step, each pass having a history of its own
+    PassCount passes; // how many times the model runs, each pass on the picture the one before it made and on an instance of its own
     [[nodiscard]] friend constexpr bool operator==(const EvaluateNr&, const EvaluateNr&) noexcept = default;
 };
 
@@ -156,7 +156,7 @@ struct Present
 
 using Step = std::variant<Transition, Dispatch, CopyBuffer, ClearTarget, EvaluateSr, EvaluateNr, Draw, Submit, Present>;
 
-constexpr std::size_t kMaxSteps = 288; // the frame at its longest, with every pass the model may be asked for
+constexpr std::size_t kMaxSteps = 192;
 using StepList = infra::BoundedVector<Step, kMaxSteps>;
 
 struct FrameState

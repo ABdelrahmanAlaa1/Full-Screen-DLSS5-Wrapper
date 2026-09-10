@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -106,7 +107,7 @@ constexpr std::array<FieldSpec, kFieldCount> kFields{ {
     { L"Model passes",
       L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run; the slider ends at 8, and "
       L"typing or stepping goes on past it.",
-      1, 8, 1, 1, static_cast<int>(interior::kMaxPasses), kPassesWarning },
+      1, 8, 1, 1, std::numeric_limits<int>::max(), kPassesWarning },
 } };
 
 struct ToggleSpec

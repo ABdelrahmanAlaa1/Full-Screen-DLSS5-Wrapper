@@ -122,7 +122,7 @@ struct Replay
     const auto scaleX = ScaleTag::Parse(static_cast<float>(target.width.Get()) / static_cast<float>(source.width.Get()));
     const auto scaleY = ScaleTag::Parse(static_cast<float>(target.height.Get()) / static_cast<float>(source.height.Get()));
     const auto flow = GridExtent(source, 1);
-    const auto passes = PassCountTag::Parse(1 + proptest::DrawBelow(rng, kMaxPasses));
+    const auto passes = PassCountTag::Parse(1 + proptest::DrawBelow(rng, 8));
     REQUIRE(finest.has_value() && scaleX.has_value() && scaleY.has_value() && flow.has_value() && passes.has_value());
     const std::array<MotionBackend, 3> backends{ MotionBackend::BuiltIn, MotionBackend::NvOpticalFlow, MotionBackend::None };
     return SessionPlan{ source,
@@ -198,7 +198,7 @@ struct Replay
     const auto count = [&](auto pred) { return std::ranges::count_if(framePlan->steps.Items(), pred); };
     const auto srs = count([](const Step& s) { return std::holds_alternative<EvaluateSr>(s); });
     const auto nrs = count([](const Step& s) { return std::holds_alternative<EvaluateNr>(s); });
-    return srs == (plan.superResolution.has_value() ? 1 : 0) && nrs == (plan.neuralRendering ? static_cast<std::ptrdiff_t>(plan.passes.Get()) : 0);
+    return srs == (plan.superResolution.has_value() ? 1 : 0) && nrs == (plan.neuralRendering ? 1 : 0);
 }
 
 [[nodiscard]] bool FirstFreshFrameResetsHistory(infra::RngState& rng) noexcept
@@ -442,34 +442,17 @@ struct Replay
     return first->next;
 }
 
-[[nodiscard]] std::vector<EvaluateNr> NeuralStepsIn(const StepList& steps) noexcept
-{
-    std::vector<EvaluateNr> found;
-    for (const Step& s : steps.Items())
-        if (const EvaluateNr* step = std::get_if<EvaluateNr>(&s); step != nullptr)
-            found.push_back(*step);
-    return found;
-}
-
-// Every pass after the first reads what the one before it wrote, none reads what it writes, the first
-// reads the picture and only the last writes the output that is shown.
-[[nodiscard]] bool PassesChainEachOutputIntoTheNext(infra::RngState& rng) noexcept
+// The count moved on the panel has to reach the one step that runs the model, which reads the picture and
+// writes the output whatever the count; the passes between are the executor's.
+[[nodiscard]] bool TheModelStepCarriesThePassCount(infra::RngState& rng) noexcept
 {
     const SessionPlan plan = WithNeuralRendering(RandomPlan(rng));
     const auto framePlan = PlanFrame(plan, InitialFrameState(plan), RequestingControls(LiveOf(plan, true, plan.tuning)));
-    if (!framePlan.has_value())
+    const EvaluateNr* step = framePlan.has_value() ? NeuralStepIn(framePlan->steps) : nullptr;
+    if (step == nullptr)
         return false;
-    const std::vector<EvaluateNr> steps = NeuralStepsIn(framePlan->steps);
-    if (steps.size() != plan.passes.Get())
-        return false;
-    for (std::size_t i = 0; i < steps.size(); ++i)
-    {
-        const bool chained = i == 0 ? steps[i].io.color.kind == (plan.superResolution.has_value() ? ResourceKind::SrOutput : ResourceKind::ModelColor) : steps[i].io.color == steps[i - 1].io.output;
-        const bool placed = i + 1 == steps.size() ? steps[i].io.output.kind == ResourceKind::NrOutput : steps[i].io.output.kind == ResourceKind::NrPass;
-        if (!chained || !placed || steps[i].pass.Get() != i || steps[i].io.color == steps[i].io.output)
-            return false;
-    }
-    return true;
+    const bool reads = step->io.color.kind == (plan.superResolution.has_value() ? ResourceKind::SrOutput : ResourceKind::ModelColor);
+    return reads && step->io.output.kind == ResourceKind::NrOutput && step->passes == plan.passes;
 }
 
 [[nodiscard]] FrameInput StillScreen(const LiveSettings& controls) noexcept
@@ -575,7 +558,7 @@ std::uint32_t FrameSuite(std::uint64_t seed) noexcept
     failures += Failures(proptest::ForAll("a drag moves the divider in the drawn step", seed, 200, ADragMovesTheDividerInTheDrawnStep));
     failures += Failures(proptest::ForAll("without a drag the divider holds", seed, 200, WithoutADragTheDividerHolds));
     failures += Failures(proptest::ForAll("a new intensity reaches the evaluated step", seed, 200, ANewIntensityReachesTheEvaluatedStep));
-    failures += Failures(proptest::ForAll("passes chain each output into the next", seed, 300, PassesChainEachOutputIntoTheNext));
+    failures += Failures(proptest::ForAll("the model step carries the pass count", seed, 300, TheModelStepCarriesThePassCount));
     failures += Failures(proptest::ForAll("switching the model off drops its step", seed, 200, SwitchingTheModelOffDropsItsStep));
     failures += Failures(proptest::ForAll("retuning reprocesses a still screen", seed, 200, RetuningReprocessesAStillScreen));
     failures += Failures(proptest::ForAll("a still screen without a change only presents", seed, 200, AStillScreenWithoutAChangeOnlyPresents));

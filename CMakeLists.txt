@@ -80,7 +80,7 @@ add_library(dscreen_core STATIC
 target_link_libraries(dscreen_core PUBLIC dscreen_flags dscreen_trace PRIVATE dscreen_trace_flags)
 
 # --- stack reserve for the executables -----------------------------------------------------------
-# The interior passes its step lists (about 66 KB each) by value through result chains, so planning
+# The interior passes its step lists (about 44 KB each) by value through result chains, so planning
 # one frame keeps a few hundred kilobytes of live stack per call level. Windows reserves only 1 MB
 # for a thread by default (Linux reserves 8 MB); the executables reserve 16 MB, which every thread
 # created without an explicit size inherits. Reserved address space is committed only when touched.
