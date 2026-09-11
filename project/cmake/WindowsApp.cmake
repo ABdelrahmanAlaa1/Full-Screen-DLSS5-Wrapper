@@ -54,6 +54,7 @@ set(DSCREEN_REAL_SOURCES
   src/effects/real/com.cpp
   src/effects/real/panel.cpp
   src/effects/real/trust.cpp
+  src/effects/real/snapshot.cpp
   src/effects/real/exclusion.cpp
   src/effects/real/window.cpp
   src/effects/real/device.cpp
@@ -92,7 +93,7 @@ else()
 endif()
 target_link_libraries(FullScreenWrapperForDLSS5 PRIVATE dscreen_core dscreen_trace_flags dscreen_stack
   "$<IF:$<CONFIG:Debug>,${NGX_LIBRARY_DEBUG},${NGX_LIBRARY_RELEASE}>"
-  d3d12 dxgi d3d11 dcomp dwmapi dxguid user32 gdi32 comctl32 shcore shell32 ole32 runtimeobject wintrust crypt32 version)
+  d3d12 dxgi d3d11 dcomp dwmapi dxguid user32 gdi32 comctl32 shcore shell32 ole32 runtimeobject wintrust crypt32 version windowscodecs)
 # The windows subsystem so a double-click opens no console; mainCRTStartup keeps the ordinary entry point,
 # and the program attaches to the console it was launched from when there is one. The manifest dependency
 # asks for version 6 of the common controls, which is what the panel's sliders and checkboxes come from.

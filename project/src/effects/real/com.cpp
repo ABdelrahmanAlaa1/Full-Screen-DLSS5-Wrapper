@@ -96,7 +96,8 @@ std::string_view Describe(ApiCall call) noexcept
                "the loader's own account of why.";
     case ApiCall::NgxModelMissing:
         return "Error nvngx_dlssnr.dll is required but was not found.\n\n"
-               "Due to copyright, I cannot bundle it with this program, you need to obtain it yourself. Just search the web for nvngx_dlssnr.dll and put it next to the exe.\n\nThe app will verify the "
+               "Due to copyright, I cannot bundle it with this program, you need to obtain it yourself. Just search the web for nvngx_dlssnr.dll and put it next to the exe.\n\nThe app will verify "
+               "the "
                "signature of the dll before using it to ensure it's correct.";
     case ApiCall::NgxDriverTooOld: return "DLSS 5 Neural Rendering is not offered by this NVIDIA driver: its NGX loader has no DLSSNR.Available";
     case ApiCall::TextureDescriptionMismatch: return "a created texture does not match its description";
@@ -125,6 +126,16 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::OpticalFlowUnavailable: return "this build has no NVIDIA Optical Flow backend (configure with -DDSCREEN_ENABLE_NVOF=ON)";
     case ApiCall::GetCurrentBackBufferIndex: return "IDXGISwapChain3::GetCurrentBackBufferIndex";
     case ApiCall::ExecutableDirectory: return "the executable path has no directory";
+    case ApiCall::CreateCaptureFolder: return "creating the capture folder";
+    case ApiCall::CapturePathTooLong: return "the capture folder and the capture's name together are longer than a path may be";
+    case ApiCall::CaptureNameTaken: return "a thousand captures already have this name, and the count stops there";
+    case ApiCall::SnapshotFormat: return "the picture is in a format the capture cannot write";
+    case ApiCall::WicCreateFactory: return "CoCreateInstance(WICImagingFactory)";
+    case ApiCall::WicCreateBitmap: return "IWICImagingFactory::CreateBitmapFromMemory";
+    case ApiCall::WicConvertPixels: return "IWICFormatConverter::Initialize";
+    case ApiCall::WicOpenFile: return "IWICStream::InitializeFromFilename on the capture file";
+    case ApiCall::WicCreateEncoder: return "IWICImagingFactory::CreateEncoder(PNG)";
+    case ApiCall::WicWriteFrame: return "IWICBitmapFrameEncode::WriteSource";
     }
     return "unknown call";
 }

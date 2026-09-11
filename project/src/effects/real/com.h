@@ -127,6 +127,16 @@ enum class ApiCall : std::uint8_t {
     OpticalFlowUnavailable,
     GetCurrentBackBufferIndex,
     ExecutableDirectory,
+    CreateCaptureFolder,
+    CapturePathTooLong,
+    CaptureNameTaken,
+    SnapshotFormat, // the code is the DXGI format the picture is in
+    WicCreateFactory,
+    WicCreateBitmap,
+    WicConvertPixels,
+    WicOpenFile,
+    WicCreateEncoder,
+    WicWriteFrame,
 };
 
 struct Error
