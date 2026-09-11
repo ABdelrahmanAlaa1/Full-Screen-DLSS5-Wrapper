@@ -269,21 +269,24 @@ struct PageSpec
     std::array<RowSpec, kMaxRows> rows;
 };
 
-// The Model page is two columns by design: the tuning down the left, and on the right how many times the
-// model runs, what its work is compared against and which window it is given. The Inert page holds what
-// a desktop gives the model no way to answer to: the depth plane is one constant, UI correction reads a
-// layer nothing binds, and optical flow drives a backend this build leaves out.
+// Each page's two columns are set by the table rather than by how many rows happen to fit the left one, so
+// the Model page has the tuning down the left and on the right how many times the model runs, what its
+// work is compared against and which window it is given; the View page has what is captured on the left
+// and how it is shown on the right; and the Advanced page has what the model is fed on the left and the
+// machine and its diagnostics on the right. The Inert page holds what a desktop gives the model no way to
+// answer to: the depth plane is one constant, UI correction reads a layer nothing binds, and optical flow
+// drives a backend this build leaves out.
 constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
     { L"Model",
       10,
       { Of(Toggle::NeuralRendering), Of(List::Preset), Of(Field::Intensity), Of(Field::LocalStructure), Of(Frame::Tone), Of(Frame::Skin), kNextColumn, Of(Field::Passes), Of(Frame::Compare),
         Of(Pick::Window) } },
-    { L"View", 7, { Of(List::Source), Of(List::Target), Of(Toggle::Vsync), Of(Group::Cursor), Of(Toggle::CaptureBorder), Of(Toggle::Topmost), Of(Group::LogLevel) } },
+    { L"View", 8, { Of(List::Source), Of(Group::Cursor), Of(Toggle::CaptureBorder), kNextColumn, Of(List::Target), Of(Toggle::Vsync), Of(Toggle::Topmost), Of(Group::LogLevel) } },
     { L"Advanced",
-      13,
-      { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), Of(List::Adapter),
-        Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
-    { L"Inert", 5, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), Of(Group::NvofGrid), Of(Group::NvofPerf) } },
+      14,
+      { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), kNextColumn,
+        Of(List::Adapter), Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
+    { L"Inert", 6, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), kNextColumn, Of(Group::NvofGrid), Of(Group::NvofPerf) } },
 } };
 
 [[nodiscard]] constexpr std::span<const RowSpec> RowsOf(const PageSpec& page) noexcept
