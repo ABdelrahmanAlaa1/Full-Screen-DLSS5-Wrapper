@@ -122,7 +122,7 @@ struct ToggleSpec
 };
 
 constexpr std::array<ToggleSpec, kToggleCount> kToggles{ {
-    { L"Run the model", L"Whether the model runs at all. Off costs nothing and shows the captured picture as it was.", false },
+    { L"Enable the model", L"Whether the model runs at all. Off costs nothing and shows the captured picture as it was.", false },
     { L"Auto mask", L"Let the model find skin itself. Skin structure and local structure do nothing while this is off.", true },
     { L"Skin follows local structure",
       L"Give skin whatever local structure is given, which is what the model reads -1 as. It is the only value between -1 and 0 that means anything, so it is a switch rather than part of the slider.",
