@@ -210,7 +210,7 @@ RealEnvironment::RealEnvironment(Gpu gpu, const SessionPlan& plan, OutputWindow 
                                  const interior::Options& options, std::uint32_t finestPixels, interior::FenceValue fence, interior::Instant start) noexcept
     : gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
       frame_{ interior::FrameNumberTag::Parse(0), *kZeroSlot, *kZeroSet, false, fence }, stats_{ start, 0, 0 }, applied_(settings), clearedDepth_(plan.depth), restartWanted_(false), resized_(false),
-      pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt)
+      pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt), recording_(std::nullopt), now_(start)
 {
 }
 
@@ -406,9 +406,12 @@ Result<FrameStart, Error> RealEnvironment::Began(const Begun& begun) noexcept
         };
         return ending ? Stopping(begun) : begun;
     };
+    now_ = begun.input.now; // WAIVER(R2): this frame's clock reading, replaced whole per frame.
     Followed(begun.input.now);
     Reconsidered(begun.input.now);
-    return SettledIfRead(begun.reading).and_then([this, &begun] { return Accept(StoppedIf(begun, AsksToEnd())); });
+    return DrainedRecording(begun.frame.slot).and_then([this, &begun] { return SettledIfRead(begun.reading); }).and_then([this] { return ShowRecording(); }).and_then([this, &begun] {
+        return Accept(StoppedIf(begun, AsksToEnd()));
+    });
 }
 
 Result<FrameStart, Error> RealEnvironment::BeginFrame(const interior::FrameState& state) noexcept
@@ -599,6 +602,14 @@ Status<Error> RealEnvironment::Resurfaced(const interior::SurfaceSettings& surfa
     return ApplySurface(gpu_, window_, applied_);
 }
 
+// The two files a capture became, for the log.
+[[nodiscard]] Status<Error> NotedFiles(const Console& console, std::string_view what, const CaptureFiles& files) noexcept
+{
+    const std::array<char, interior::FilePath::Capacity + 1> original = infra::NarrowedChars<interior::FilePath::Capacity + 1>(files.original.Get());
+    const std::array<char, interior::FilePath::Capacity + 1> processed = infra::NarrowedChars<interior::FilePath::Capacity + 1>(files.processed.Get());
+    return Log(console, interior::LogLevel::Info, infra::Formatted<720>("{}: {} and {}", what, original.data(), processed.data()).Get());
+}
+
 [[nodiscard]] bool NothingToHideFrom(const Gpu& gpu, const EnvironmentSettings& settings) noexcept
 {
     // A window capture holds that window's own content and nothing stacked in front, so the overlay was never
@@ -619,21 +630,77 @@ Status<Error> RealEnvironment::Settled(const PanelReading& reading) noexcept
         };
         return excluding ? WithoutAffinity(s) : s;
     };
-    // A screenshot asked for is named for what is being captured: the window followed, or the desktop.
-    static constexpr auto OrderOf = [] [[nodiscard]] (const PanelReading& reading, const std::optional<interior::MonitorHandle>& followed) noexcept -> std::optional<SnapshotOrder> {
+    // A capture is named for what is being captured: the window followed, or the desktop.
+    static constexpr auto OrderOf = [] [[nodiscard]] (const PanelReading& reading, const std::optional<interior::MonitorHandle>& followed) noexcept -> SnapshotOrder {
         static constexpr auto LabelOf = [] [[nodiscard]] (const std::optional<interior::MonitorHandle>& followed) noexcept -> interior::CaptureLabel {
             if (!followed.has_value())
                 return interior::CaptureLabel::Parse(interior::kDesktopLabel).value_or(interior::CaptureLabel{});
             return interior::CaptureLabelOf(TitleOfWindow(*followed).Get());
         };
-        if (!reading.capture.screenshot)
-            return std::nullopt;
         return SnapshotOrder{ reading.capture.folder, LabelOf(followed), reading.live, reading.capture.everything };
     };
+
+    static constexpr auto ScreenshotOf = [] [[nodiscard]] (const PanelReading& reading, const SnapshotOrder& order) noexcept -> std::optional<SnapshotOrder> {
+        if (!reading.capture.screenshot)
+            return std::nullopt;
+        return order;
+    };
     const interior::SurfaceSettings surface = AsExcluded(reading.surface, NothingToHideFrom(gpu_, applied_));
-    return Resurfaced(surface).and_then([this, &reading] { return Recleared(reading.live.depth); }).transform([this, &reading] {
-        snapshot_ = OrderOf(reading, applied_.followed); // WAIVER(R2): what this frame's reading asked for, replaced whole each frame.
+    const SnapshotOrder order = OrderOf(reading, applied_.followed);
+    return Resurfaced(surface)
+        .and_then([this, &reading] { return Recleared(reading.live.depth); })
+        .and_then([this, &reading, &order] { return ToggledRecording(reading, order); })
+        .transform([this, &reading, &order] {
+            snapshot_ = ScreenshotOf(reading, order); // WAIVER(R2): what this frame's reading asked for, replaced whole each frame.
+        });
+}
+
+Status<Error> RealEnvironment::ToggledRecording(const PanelReading& reading, const SnapshotOrder& order) noexcept
+{
+    if (!reading.capture.record)
+        return {};
+    if (recording_.has_value())
+        return StoppedRecording();
+    return StartRecording(order, now_).transform([this](VideoRecording started) {
+        recording_ = std::move(started); // WAIVER(R2): the recording under way, replaced whole.
     });
+}
+
+Status<Error> RealEnvironment::StoppedRecording() noexcept
+{
+    if (!recording_.has_value())
+        return {};
+    return StopRecording(gpu_, frame_.fence, std::move(*recording_)).and_then([this](const Stopped& stopped) {
+        recording_ = std::nullopt;                 // WAIVER(R2): the recording ended, replaced whole.
+        frame_ = WithFence(frame_, stopped.fence); // WAIVER(R2): the last signalled fence, replaced whole.
+        return NotedFiles(console_, "recording saved", stopped.files);
+    });
+}
+
+Status<Error> RealEnvironment::Finished() noexcept
+{
+    return StoppedRecording();
+}
+
+Status<Error> RealEnvironment::DrainedRecording(interior::FrameSlot slot) noexcept
+{
+    if (!recording_.has_value())
+        return {};
+    return DrainedSlot(std::move(*recording_), slot).transform([this](VideoRecording drained) {
+        recording_ = std::move(drained); // WAIVER(R2): the recording under way, replaced whole.
+    });
+}
+
+Status<Error> RealEnvironment::ShowRecording() noexcept
+{
+    static constexpr auto ElapsedOf = [] [[nodiscard]] (const std::optional<VideoRecording>& recording, interior::Instant now) noexcept -> std::optional<interior::Microseconds> {
+        if (!recording.has_value())
+            return std::nullopt;
+        return Elapsed(*recording, now);
+    };
+    if (panel_ != nullptr)
+        ApplyRecording(*panel_, ElapsedOf(recording_, now_));
+    return {};
 }
 
 std::optional<interior::CommandLine> RealEnvironment::Restart(const interior::Options& options) const noexcept
@@ -678,23 +745,32 @@ Result<ExecutionReport, Error> RealEnvironment::Ran(const interior::FramePlan& p
 
 Result<ExecutionReport, Error> RealEnvironment::Captured(const interior::FramePlan& plan, const ExecutionReport& report) noexcept
 {
-    static constexpr auto Noted = [] [[nodiscard]] (const Console& console, const Snapshot& s) noexcept -> Status<Error> {
-        const std::array<char, interior::FilePath::Capacity + 1> original = infra::NarrowedChars<interior::FilePath::Capacity + 1>(s.original.Get());
-        const std::array<char, interior::FilePath::Capacity + 1> processed = infra::NarrowedChars<interior::FilePath::Capacity + 1>(s.processed.Get());
-        return Log(console, interior::LogLevel::Info, infra::Formatted<720>("screenshot saved: {} and {}", original.data(), processed.data()).Get());
-    };
     if (!snapshot_.has_value())
         return report;
     return SaveSnapshot(gpu_, frame_, plan.next, *snapshot_).and_then([this, &report](const Snapshot& s) {
         frame_ = WithFence(frame_, s.fence); // WAIVER(R2): the last signalled fence, replaced whole.
         snapshot_ = std::nullopt;            // WAIVER(R2): the order was taken, so nothing waits.
-        return Noted(console_, s).transform([&] { return ExecutionReport{ s.fence, report.stepsExecuted }; });
+        return NotedFiles(console_, "screenshot saved", CaptureFiles{ s.original, s.processed }).transform([&] { return ExecutionReport{ s.fence, report.stepsExecuted }; });
+    });
+}
+
+Result<ExecutionReport, Error> RealEnvironment::RecordedFrame(const interior::FramePlan& plan, const ExecutionReport& report) noexcept
+{
+    if (!recording_.has_value())
+        return report;
+    return RecordFrame(gpu_, frame_, plan.next, now_, std::move(*recording_)).transform([this, &report](Recorded recorded) {
+        recording_ = std::move(recorded.recording); // WAIVER(R2): the recording under way, replaced whole.
+        frame_ = WithFence(frame_, recorded.fence); // WAIVER(R2): the last signalled fence, replaced whole.
+        return ExecutionReport{ recorded.fence, report.stepsExecuted };
     });
 }
 
 Result<ExecutionReport, Error> RealEnvironment::Execute(const interior::FramePlan& plan) noexcept
 {
-    return Retuned(plan.next.controls).and_then([this, &plan](const ExecutionReport&) { return Ran(plan); }).and_then([this, &plan](const ExecutionReport& report) { return Captured(plan, report); });
+    return Retuned(plan.next.controls)
+        .and_then([this, &plan](const ExecutionReport&) { return Ran(plan); })
+        .and_then([this, &plan](const ExecutionReport& report) { return Captured(plan, report); })
+        .and_then([this, &plan](const ExecutionReport& report) { return RecordedFrame(plan, report); });
 }
 
 Error RealEnvironment::FromPlanError(interior::PlanFrameError error) noexcept

@@ -136,6 +136,13 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::WicOpenFile: return "IWICStream::InitializeFromFilename on the capture file";
     case ApiCall::WicCreateEncoder: return "IWICImagingFactory::CreateEncoder(PNG)";
     case ApiCall::WicWriteFrame: return "IWICBitmapFrameEncode::WriteSource";
+    case ApiCall::MfStartup: return "MFStartup";
+    case ApiCall::MfCreateSinkWriter: return "MFCreateSinkWriterFromURL on the recording file";
+    case ApiCall::MfConfigureStream: return "describing the recording's video stream to the sink writer";
+    case ApiCall::MfBeginWriting: return "IMFSinkWriter::BeginWriting";
+    case ApiCall::MfCreateSample: return "making a video sample for the recording";
+    case ApiCall::MfWriteSample: return "IMFSinkWriter::WriteSample";
+    case ApiCall::MfFinalize: return "IMFSinkWriter::Finalize";
     }
     return "unknown call";
 }

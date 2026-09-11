@@ -2,6 +2,7 @@
 #include "effects/real/console.h"
 #include "effects/real/executor.h"
 #include "effects/real/panel.h"
+#include "effects/real/recorder.h"
 #include "effects/real/snapshot.h"
 #include "effects/real/window.h"
 #include "interior/monitors.h"
@@ -53,6 +54,8 @@ public:
     // Rebuilds the neural rendering feature when the operator has changed its tuning; the model reads that
     // only while the feature is built. A no-op when nothing changed.
     [[nodiscard]] infra::Result<ExecutionReport, Error> Retuned(const interior::LiveSettings& controls) noexcept;
+    // Ends a recording under way, once the session's last frame is done: a file left open would not play.
+    [[nodiscard]] infra::Status<Error> Finished() noexcept;
     [[nodiscard]] static Error FromPlanError(interior::PlanFrameError error) noexcept;
     [[nodiscard]] const Gpu& Devices() const noexcept { return gpu_; }
     [[nodiscard]] const OutputWindow& Window() const noexcept { return window_; }
@@ -69,6 +72,13 @@ private:
     [[nodiscard]] infra::Result<ExecutionReport, Error> Ran(const interior::FramePlan& plan) noexcept;
     // Takes the screenshot the panel asked for, once the frame it belongs to has been submitted.
     [[nodiscard]] infra::Result<ExecutionReport, Error> Captured(const interior::FramePlan& plan, const ExecutionReport& report) noexcept;
+    // Records the frame's two pictures for a recording under way, once the frame has been submitted.
+    [[nodiscard]] infra::Result<ExecutionReport, Error> RecordedFrame(const interior::FramePlan& plan, const ExecutionReport& report) noexcept;
+    // Encodes the frames whose copies have landed, which is what the slot about to be reused holds.
+    [[nodiscard]] infra::Status<Error> DrainedRecording(interior::FrameSlot slot) noexcept;
+    [[nodiscard]] infra::Status<Error> ToggledRecording(const PanelReading& reading, const SnapshotOrder& order) noexcept;
+    [[nodiscard]] infra::Status<Error> StoppedRecording() noexcept;
+    [[nodiscard]] infra::Status<Error> ShowRecording() noexcept;
     [[nodiscard]] infra::Result<FrameStart, Error> Began(const Begun& begun) noexcept;
     [[nodiscard]] infra::Status<Error> Resurfaced(const interior::SurfaceSettings& surface) noexcept;
     [[nodiscard]] infra::Status<Error> SettledIfRead(const std::optional<PanelReading>& reading) noexcept;
@@ -106,20 +116,22 @@ private:
     const ControlPanel* panel_; // borrowed: the panel outlives the session, so a rebuilt one keeps its place
     Console console_;
     std::uint32_t finestPixels_;
-    FrameContext frame_;                    // WAIVER(R2): per-frame bookkeeping of the effect layer, replaced whole by BeginFrame and Execute.
-    Statistics stats_;                      // WAIVER(R2): throughput counters, replaced whole once per frame.
-    EnvironmentSettings applied_;           // WAIVER(R2): what the window and the capture were last told, replaced whole on a change.
-    interior::DepthValue clearedDepth_;     // WAIVER(R2): the value the depth plane was last cleared to.
-    bool restartWanted_;                    // WAIVER(R2): set once, when the operator asks the panel for a new session.
-    bool resized_;                          // WAIVER(R2): set once, when the window being followed has settled at another size.
-    interior::Extent pending_;              // WAIVER(R2): the size the window was last seen at, replaced whole as it changes.
-    interior::Instant since_;               // WAIVER(R2): when it was first seen at that size.
-    interior::Options options_;             // what this session was built from, which the panel is compared against
-    interior::CommandLine built_;           // the shape it was built with
-    interior::CommandLine wanted_;          // WAIVER(R2): the shape the panel now describes, replaced whole as it changes.
-    interior::Instant asked_;               // WAIVER(R2): when it first described it.
-    bool abandoned_;                        // WAIVER(R2): set once, when the window being followed stopped being on screen.
-    std::optional<SnapshotOrder> snapshot_; // WAIVER(R2): the screenshot the panel asked for this frame, taken after the frame and cleared then.
+    FrameContext frame_;                      // WAIVER(R2): per-frame bookkeeping of the effect layer, replaced whole by BeginFrame and Execute.
+    Statistics stats_;                        // WAIVER(R2): throughput counters, replaced whole once per frame.
+    EnvironmentSettings applied_;             // WAIVER(R2): what the window and the capture were last told, replaced whole on a change.
+    interior::DepthValue clearedDepth_;       // WAIVER(R2): the value the depth plane was last cleared to.
+    bool restartWanted_;                      // WAIVER(R2): set once, when the operator asks the panel for a new session.
+    bool resized_;                            // WAIVER(R2): set once, when the window being followed has settled at another size.
+    interior::Extent pending_;                // WAIVER(R2): the size the window was last seen at, replaced whole as it changes.
+    interior::Instant since_;                 // WAIVER(R2): when it was first seen at that size.
+    interior::Options options_;               // what this session was built from, which the panel is compared against
+    interior::CommandLine built_;             // the shape it was built with
+    interior::CommandLine wanted_;            // WAIVER(R2): the shape the panel now describes, replaced whole as it changes.
+    interior::Instant asked_;                 // WAIVER(R2): when it first described it.
+    bool abandoned_;                          // WAIVER(R2): set once, when the window being followed stopped being on screen.
+    std::optional<SnapshotOrder> snapshot_;   // WAIVER(R2): the screenshot the panel asked for this frame, taken after the frame and cleared then.
+    std::optional<VideoRecording> recording_; // WAIVER(R2): the recording under way, replaced whole as frames are added and cleared when it stops.
+    interior::Instant now_;                   // WAIVER(R2): this frame's clock reading, replaced whole per frame.
 };
 
 [[nodiscard]] infra::Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional<NgxRuntime> runtime, const interior::SessionPlan& plan, const interior::Geometry& geometry,

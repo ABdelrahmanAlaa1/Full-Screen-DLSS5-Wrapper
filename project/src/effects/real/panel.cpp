@@ -279,9 +279,16 @@ struct ActionSpec
 constexpr wchar_t kScreenshotHint[] = L"Writes two PNG files from the same frame: the picture the model was given, and the picture shown for it.\n"
                                       L"Named for the source, the settings and the minute; a name already taken gets a count.";
 
+constexpr wchar_t kRecordHint[] = L"Records the picture the model was given and the picture shown for it as two MP4 files, frame by frame with the same times, until clicked again.\n"
+                                  L"Named like screenshots. Changing a setting that builds the session again ends the recording.";
+constexpr wchar_t kRecordLabel[] = L"Record video";
+constexpr wchar_t kStopLabel[] = L"Stop recording";
+constexpr int kElapsedWidth = 120;
+
 constexpr std::array<ActionSpec, kActionCount> kActions{ {
     { L"Save screenshot", kScreenshotHint },
     { L"Save screenshot", kScreenshotHint },
+    { kRecordLabel, kRecordHint },
 } };
 
 // --- what sits on which page, and in what order -------------------------------------------------------
@@ -378,7 +385,7 @@ constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
       14,
       { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), kNextColumn,
         Of(List::Adapter), Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
-    { L"Capture", 3, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Action::Screenshot) } },
+    { L"Capture", 4, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Action::Screenshot), Of(Action::Record) } },
     { L"About", 3, { Of(Note::Title), Of(Note::Purpose), Of(Note::Repository) } },
     { L"Inert", 6, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), kNextColumn, Of(Group::NvofGrid), Of(Group::NvofPerf) } },
 } };
@@ -1073,6 +1080,7 @@ struct Built
     std::array<HWND, kFolderCount> folderBoxes;
     std::array<HWND, kFolderCount> folderBrowsers;
     std::array<HWND, kActionCount> actions;
+    HWND recordingLabel;
 };
 
 [[nodiscard]] LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) noexcept;
@@ -1268,6 +1276,12 @@ LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) no
     return { panel.folderLabels[f], panel.folderBoxes[f], panel.folderBrowsers[f] };
 }
 
+// The record button has the time beside it; the others stand alone, and nothing is shown for nothing.
+[[nodiscard]] std::array<HWND, 2> ControlsOfAction(const ControlPanel& panel, std::size_t a) noexcept
+{
+    return { panel.actions[a], a == static_cast<std::size_t>(Action::Record) ? panel.recordingLabel : nullptr };
+}
+
 [[nodiscard]] int HowOf(bool visible) noexcept
 {
     return visible ? SW_SHOW : SW_HIDE;
@@ -1339,7 +1353,7 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
             if (row.kind == Kind::Note)
                 (void)::ShowWindow(panel.notes[row.index], HowOf(visible));
             else if (row.kind == Kind::Action)
-                (void)::ShowWindow(panel.actions[row.index], HowOf(visible));
+                ShowAll(ControlsOfAction(panel, row.index), HowOf(visible));
             else if (row.kind == Kind::Folder)
                 ShowAll(ControlsOfFolder(panel, row.index), HowOf(visible));
             else if (row.kind == Kind::Frame)
@@ -2101,7 +2115,14 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         const Placement at = PlaceOfRow(Kind::Action, a, m);
                         return CreateCommanded(parent, kActions[a].label, Bounds(m, at.left, at.control, kActionWidth, m.ControlHeight()), kActionCommand);
                     };
+
+                    // The time a recording has run stands beside the button that stops it, and says nothing until then.
+                    static constexpr auto CreateElapsed = [] [[nodiscard]] (HWND parent, const Metrics& m) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Action, static_cast<std::size_t>(Action::Record), m);
+                        return CreateChild(parent, WC_STATICW, L"", SS_LEFT | SS_CENTERIMAGE, 0, Bounds(m, at.left + kActionWidth + kMargin, at.control, kElapsedWidth, m.ControlHeight()));
+                    };
                     built.actions = infra::Generated<HWND, kActionCount>([&](std::size_t a) { return CreateAction(parent, m, a); });
+                    built.recordingLabel = CreateElapsed(parent, m);
                     return built;
                 };
                 const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), findings, BuildFields(parent, m, StartingValues(o, live), Built{}));
@@ -2173,6 +2194,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.folderBoxes,
                                  built.folderBrowsers,
                                  built.actions,
+                                 built.recordingLabel,
                                  o.displayAffinity,
                                  o.clickThrough,
                                  findings.superResolution,
@@ -2199,7 +2221,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                             return { panel.labels,    panel.sliders,    panel.boxes,  panel.spins, panel.resets,       panel.toggles,     panel.groupLabels,    panel.pickLabels, panel.crosshairs,
                                      panel.pickNames, panel.pickResets, panel.frames, panel.notes, panel.folderLabels, panel.folderBoxes, panel.folderBrowsers, panel.actions };
                         };
-                        return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs);
+                        return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs) && IsPresent(panel.recordingLabel);
                     };
                     return EveryRowPresent(panel) && AllPresent(Furniture(panel));
                 };
@@ -2521,8 +2543,10 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
             const std::array<wchar_t, kPathCapacity + 1> text = PathTextOf(panel.folderBoxes[static_cast<std::size_t>(Folder::Captures)]);
             return interior::DirectoryPath::Parse(text.data()).value_or(interior::DirectoryPath{});
         };
-        const bool screenshot = std::ranges::count_if(panel.actions, Taken) > 0;
-        return CaptureRequest{ screenshot, FolderOf(panel), IsOn(panel, Toggle::AllParameters) };
+        static constexpr auto TakenFrom = [] [[nodiscard]] (const ControlPanel& panel, Action action) noexcept -> bool { return Taken(panel.actions[static_cast<std::size_t>(action)]); };
+        const bool fromCapture = TakenFrom(panel, Action::Screenshot);
+        const bool fromModel = TakenFrom(panel, Action::ModelScreenshot);
+        return CaptureRequest{ fromCapture || fromModel, TakenFrom(panel, Action::Record), FolderOf(panel), IsOn(panel, Toggle::AllParameters) };
     };
     Arrange(panel);
     const interior::Fraction split = interior::FractionTag::Parse(SettledValue(panel, Field::Split)).value_or(*kCentre);
@@ -2648,6 +2672,24 @@ void ApplyDisplay(const ControlPanel& panel, interior::DisplayMode display) noex
 void ApplySplit(const ControlPanel& panel, interior::Fraction split) noexcept
 {
     Commit(panel, static_cast<std::size_t>(Field::Split), StepsOf(split.Get(), kFields[static_cast<std::size_t>(Field::Split)]));
+}
+void ApplyRecording(const ControlPanel& panel, const std::optional<interior::Microseconds>& elapsed) noexcept
+{
+    static constexpr auto ElapsedText = [] [[nodiscard]] (interior::Microseconds elapsed) noexcept -> std::array<wchar_t, 16> {
+        std::array<wchar_t, 16> text{}; // WAIVER(R2): a local buffer filled once, before use.
+        const unsigned long long seconds = elapsed.Get() / 1000000u;
+        (void)::_snwprintf_s(text.data(), text.size(), _TRUNCATE, L"%llu:%02llu", seconds / 60u, seconds % 60u);
+        return text;
+    };
+    const HWND button = panel.actions[static_cast<std::size_t>(Action::Record)];
+    if (!elapsed.has_value())
+    {
+        WriteText(button, kRecordLabel);
+        WriteText(panel.recordingLabel, L"");
+        return;
+    }
+    WriteText(button, kStopLabel);
+    WriteText(panel.recordingLabel, ElapsedText(*elapsed).data());
 }
 
 bool IsPanelClosed(const ControlPanel& panel) noexcept

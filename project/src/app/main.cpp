@@ -675,6 +675,7 @@ struct Ended
             return LogExclusion(console, b, env.Devices().capture.excludesOurWindows)
                 .and_then([&] { return Log(console, LogLevel::Info, "Running. Hotkeys: Ctrl+Alt+Shift+O original/processed, Ctrl+Alt+Shift+C split view, Ctrl+Alt+Shift+Q quit"); })
                 .and_then([&] { return Settled(env, app::RunSession<real::RealEnvironment, Error>(env, plan, interior::InitialFrameState(plan), kFrameLimit)); })
+                .and_then([&](interior::FrameNumber frames) { return env.Finished().transform([frames] { return frames; }); })
                 .transform([&](interior::FrameNumber frames) { return Ended{ .frames = frames, .again = env.Restart(b.options), .resized = env.Resized(), .abandoned = env.Abandoned() }; });
         };
         const real::PanelFindings findings = FindingsFor(b, d);

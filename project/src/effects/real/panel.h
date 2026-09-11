@@ -63,7 +63,7 @@ enum class Folder : std::size_t { Captures, Count };
 
 // A push button that asks for one thing to be done: a screenshot, from the Capture page and again from the
 // Model page, so it is to hand while the model is being tuned.
-enum class Action : std::size_t { Screenshot, ModelScreenshot, Count };
+enum class Action : std::size_t { Screenshot, ModelScreenshot, Record, Count };
 
 constexpr std::size_t kFieldCount = static_cast<std::size_t>(Field::Count);
 constexpr std::size_t kToggleCount = static_cast<std::size_t>(Toggle::Count);
@@ -136,6 +136,7 @@ struct ControlPanel
     std::array<HWND, kFolderCount> folderBoxes;
     std::array<HWND, kFolderCount> folderBrowsers; // each holds the box beside it, which the folder it browses for goes into
     std::array<HWND, kActionCount> actions;        // each holds whether it was clicked since the panel was last read
+    HWND recordingLabel;                           // how long the recording has run, beside the button that stops it; empty otherwise
     // Two settings the panel carries but does not show: off, each spoils the picture rather than changing
     // it, so they are the command line's to set and the panel's to pass on unaltered.
     bool displayAffinity;
@@ -154,6 +155,7 @@ struct ControlPanel
 struct CaptureRequest
 {
     bool screenshot; // a screenshot button was clicked since the panel was last read
+    bool record;     // the record button was clicked since the panel was last read, which starts or stops a recording
     interior::DirectoryPath folder;
     bool everything; // every parameter goes into the name
 };
@@ -193,6 +195,10 @@ void ReleaseWindow(const ControlPanel& panel) noexcept;
 // Moves the panel's own controls, so the hotkeys and the divider drag stay in step with what it shows.
 void ApplyDisplay(const ControlPanel& panel, interior::DisplayMode display) noexcept;
 void ApplySplit(const ControlPanel& panel, interior::Fraction split) noexcept;
+
+// Shows whether a recording is under way and for how long: the record button reads as the way to stop it,
+// and the time runs beside it. Nothing means none is.
+void ApplyRecording(const ControlPanel& panel, const std::optional<interior::Microseconds>& elapsed) noexcept;
 
 // True once the operator has closed the panel, which ends the session.
 [[nodiscard]] bool IsPanelClosed(const ControlPanel& panel) noexcept;

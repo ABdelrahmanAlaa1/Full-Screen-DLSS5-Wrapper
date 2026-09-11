@@ -137,6 +137,13 @@ enum class ApiCall : std::uint8_t {
     WicOpenFile,
     WicCreateEncoder,
     WicWriteFrame,
+    MfStartup,
+    MfCreateSinkWriter,
+    MfConfigureStream,
+    MfBeginWriting,
+    MfCreateSample,
+    MfWriteSample,
+    MfFinalize,
 };
 
 struct Error

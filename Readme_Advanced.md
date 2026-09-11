@@ -73,6 +73,13 @@ off, `_Intensity-N` when the intensity is under 100%, and `_Nx` when the model r
 name already taken gets `_2`, `_3` and so on, the same count on both files. The frame loop stands still
 while the two files are written, so the picture pauses for as long as that takes.
 
+**Record video** on the same page records the two pictures as two MP4 files, `_original.mp4` and
+`_processed.mp4`, named the same way, until it is clicked again; the time recorded so far runs beside it.
+Each frame's two pictures are copied out of the GPU together and given the same time in both files, taken
+from the frame's own clock reading, so the two stay in step however the frame rate varies. The encoding is
+Windows' own H.264 through Media Foundation, on the CPU, and it costs frame rate: fine at 1080p, heavy at
+4K. A setting that builds the session again ends the recording, and so does quitting.
+
 ## The model files
 
 `nvngx_dlssnr.dll` (neural rendering, feature 18) is NVIDIA's, is not in this repository, and is not in the
