@@ -74,6 +74,9 @@ constexpr int kFrameBottom = 4; // between the last row's gap and the frame's bo
 constexpr int kFrameGap = 10;   // between a frame's bottom edge and whatever stands under it
 constexpr int kFrameInset = 10; // how far the rows inside a frame stand in from its edge, on either side
 
+// How a number is written in its box: as a count, to two decimal places, or as a percentage of one.
+enum class Notation : std::uint8_t { Count, Decimal, Percent };
+
 // Each slider counts in steps of a unit: 1 counts whole numbers, 100 counts hundredths. A range says how
 // far a slider reaches, not what the model accepts; the command line still takes any finite value.
 struct FieldSpec
@@ -83,6 +86,7 @@ struct FieldSpec
     int minimum;
     int maximum; // where the slider ends, which for an open field is only where it ends to begin with
     int steps;
+    Notation notation;
     int increment;          // what one click of an arrow moves, in the same steps as the rest
     int ceiling;            // as far as the number may be typed or stepped: the slider's end, or past it where the model puts no top on it
     const wchar_t* warning; // what a glyph beside the label warns of, or nothing
@@ -101,24 +105,24 @@ constexpr int kOpenUnits = 1000;
 }
 
 constexpr std::array<FieldSpec, kFieldCount> kFields{ {
-    { L"Intensity", L"0 is the original image (0%), 1.0 is the full effect (100%).\r\nEffectively a blending percentage.", 0, 100, 100, 10, 100, nullptr },
-    { L"Local structure", L"Detail the model adds within a region.\r\nDoes nothing while auto mask is off.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100, 100, Open(100),
-      nullptr },
-    { L"Local tone", L"How far the model moves local brightness.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100, 100, Open(100), nullptr },
+    { L"Intensity", L"0% is the original image, 100% is the full effect: a blending percentage.\r\nThe command line takes it as 0 to 1.", 0, 100, 100, Notation::Percent, 10, 100, nullptr },
+    { L"Local structure", L"Detail the model adds within a region.\r\nDoes nothing while auto mask is off.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100,
+      Notation::Decimal, 100, Open(100), nullptr },
+    { L"Local tone", L"How far the model moves local brightness.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100, Notation::Decimal, 100, Open(100), nullptr },
     { L"Skin structure", L"Detail on skin.\r\nDoes nothing while auto mask is off, or while skin follows local structure.\r\n(You can manually set this higher than the slider limit)", 0, 1000, 100,
-      100, Open(100), nullptr },
-    { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, 400, nullptr },
-    { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, 10, 400, nullptr },
-    { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, 10, 100, nullptr },
-    { L"Depth plane", L"The desktop has no depth, so one flat value stands in for all of it. Every pixel carries the same number, so changing it does nothing you can see.", 0, 100, 100, 10, 100,
-      nullptr },
-    { L"Reset threshold", L"How much of the picture has to go unmatched before the model's history is thrown away.", 0, 100, 100, 10, 100, nullptr },
-    { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, 1, 7, nullptr },
-    { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, 1, 15, nullptr },
+      Notation::Decimal, 100, Open(100), nullptr },
+    { L"Motion vector scale X", L"What the model multiplies the horizontal motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, Notation::Decimal, 10, 400, nullptr },
+    { L"Motion vector scale Y", L"What the model multiplies the vertical motion by. 1 passes the synthesised vectors through unchanged.", -400, 400, 100, Notation::Decimal, 10, 400, nullptr },
+    { L"Split position", L"Where the divider sits in the split view. Ctrl+Alt+Shift and the mouse drags it on screen.", 0, 100, 100, Notation::Decimal, 10, 100, nullptr },
+    { L"Depth plane", L"The desktop has no depth, so one flat value stands in for all of it. Every pixel carries the same number, so changing it does nothing you can see.", 0, 100, 100,
+      Notation::Decimal, 10, 100, nullptr },
+    { L"Reset threshold", L"How much of the picture has to go unmatched before the model's history is thrown away.", 0, 100, 100, Notation::Decimal, 10, 100, nullptr },
+    { L"Motion detail level", L"Finest level the matcher works at: 0 full resolution, 1 half, 2 quarter. Lower costs more.", 0, 7, 1, Notation::Count, 1, 7, nullptr },
+    { L"Super resolution preset", L"Render preset asked of DLSS Super Resolution; 0 leaves the choice to the driver.", 0, 15, 1, Notation::Count, 1, 15, nullptr },
     { L"Model passes",
       L"How many times a frame the model runs, each pass on the picture the one before it made and with a history of its own. 1 is the model as it is meant to run.\r\n(You can manually set this "
       L"higher than the slider limit)",
-      1, 8, 1, 1, std::numeric_limits<int>::max(), kPassesWarning },
+      1, 8, 1, Notation::Count, 1, std::numeric_limits<int>::max(), kPassesWarning },
 } };
 
 struct ToggleSpec
@@ -631,12 +635,14 @@ constexpr wchar_t kReleaseHint[] = L"Let the window go and capture a monitor aga
 
 [[nodiscard]] std::optional<int> TypedSteps(HWND box, const FieldSpec& spec) noexcept
 {
+    // A percentage is typed as one, with or without its sign, and stands for the fraction it names.
+    static constexpr auto Fraction = [] [[nodiscard]] (float typed, const FieldSpec& spec) noexcept -> float { return spec.notation == Notation::Percent ? typed / 100.0f : typed; };
     const std::array<wchar_t, kTextCapacity> text = TextOf(box);
     wchar_t* end = nullptr;
     const float value = std::wcstof(text.data(), &end);
     if (end == text.data())
         return std::nullopt;
-    return std::clamp(static_cast<int>(std::lround(value * static_cast<float>(spec.steps))), spec.minimum, spec.ceiling);
+    return std::clamp(static_cast<int>(std::lround(Fraction(value, spec) * static_cast<float>(spec.steps))), spec.minimum, spec.ceiling);
 }
 
 [[nodiscard]] int Settled(const ControlPanel& panel, std::size_t field) noexcept
@@ -669,8 +675,10 @@ void WriteText(HWND control, const wchar_t* wanted) noexcept
 void WriteBox(HWND box, int steps, const FieldSpec& spec) noexcept
 {
     static constexpr auto Printed = [] [[nodiscard]] (int steps, const FieldSpec& spec) noexcept -> infra::BoundedString<char, 15> {
-        if (spec.steps == 1)
+        if (spec.notation == Notation::Count)
             return infra::Formatted<15>("{}", steps);
+        if (spec.notation == Notation::Percent)
+            return infra::Formatted<15>("{}%", std::lround(100.0 * steps / spec.steps));
         return infra::Formatted<15>("{:.2f}", static_cast<double>(steps) / spec.steps);
     };
 
