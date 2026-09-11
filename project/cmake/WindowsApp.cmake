@@ -56,6 +56,7 @@ set(DSCREEN_REAL_SOURCES
   src/effects/real/trust.cpp
   src/effects/real/snapshot.cpp
   src/effects/real/recorder.cpp
+  src/effects/real/cursor.cpp
   src/effects/real/exclusion.cpp
   src/effects/real/window.cpp
   src/effects/real/device.cpp

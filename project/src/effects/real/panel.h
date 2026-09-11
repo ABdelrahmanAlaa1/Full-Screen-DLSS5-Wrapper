@@ -37,6 +37,7 @@ enum class Toggle : std::size_t {
     Indicator,
     CubinCache,
     AllParameters, // every parameter goes into a capture's name, the ones at their defaults included
+    CaptureCursor, // the cursor is drawn into captures where it was, when the capture itself leaves it out
     Count
 };
 
@@ -158,6 +159,7 @@ struct CaptureRequest
     bool record;     // the record button was clicked since the panel was last read, which starts or stops a recording
     interior::DirectoryPath folder;
     bool everything; // every parameter goes into the name
+    bool cursor;     // the cursor is drawn into the pictures
 };
 
 // What the panel says this frame: the settings that take effect at once, the view they belong to, and what

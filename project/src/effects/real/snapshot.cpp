@@ -42,6 +42,11 @@ interior::CaptureMoment MomentNow() noexcept
     return interior::CaptureMoment{ now.wMonth, now.wDay, now.wHour, now.wMinute };
 }
 
+FrameSize SizeOf(const Layout& layout) noexcept
+{
+    return FrameSize{ layout.footprint.Footprint.Width, layout.footprint.Footprint.Height };
+}
+
 Status<Error> EnsureCaptureFolder(const interior::DirectoryPath& folder) noexcept
 {
     if (::CreateDirectoryW(folder.CString(), nullptr) != FALSE || ::GetLastError() == ERROR_ALREADY_EXISTS)
@@ -191,9 +196,18 @@ namespace {
     }
 }
 
-// The rows as copied become a WIC bitmap, converted to plain 24-bit colour, and encoded as PNG at the
-// encoder's own compression, which is what "standard" means to it.
-[[nodiscard]] Status<Error> WritePng(IWICImagingFactory* wic, const Readback& readback, void* pixels, const interior::FilePath& path) noexcept
+// What is drawn over a picture before it is written: the cursor, placed for the screen area the picture
+// shows, which is the original picture's size for both pictures of a frame.
+struct Overlaid
+{
+    FrameSize source;
+    std::optional<CursorOverlay> cursor;
+};
+
+// The rows as copied become a WIC bitmap, converted to 32-bit blue, green and red with a spare byte and held
+// as pixels of its own so the cursor can be drawn on it, then converted to plain 24-bit colour and encoded
+// as PNG at the encoder's own compression, which is what "standard" means to it.
+[[nodiscard]] Status<Error> WritePng(IWICImagingFactory* wic, const Readback& readback, void* pixels, const Overlaid& overlaid, const interior::FilePath& path) noexcept
 {
     static constexpr auto BitmapOf = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& r, void* pixels, const GUID& format) noexcept -> Result<Com<IWICBitmap>, Error> {
         const D3D12_SUBRESOURCE_FOOTPRINT& f = r.layout.footprint.Footprint;
@@ -202,12 +216,35 @@ namespace {
             .transform([&bitmap] { return bitmap; });
     };
 
-    static constexpr auto ConvertedOf = [] [[nodiscard]] (IWICImagingFactory * wic, const Com<IWICBitmap>& bitmap) noexcept -> Result<Com<IWICFormatConverter>, Error> {
+    static constexpr auto ConvertedOf = [] [[nodiscard]] (IWICImagingFactory * wic, const Com<IWICBitmap>& bitmap, const GUID& to) noexcept -> Result<Com<IWICFormatConverter>, Error> {
         Com<IWICFormatConverter> converter; // WAIVER(R2): the answer of one call, read once after it.
         return Check(wic->CreateFormatConverter(&converter), ApiCall::WicConvertPixels)
-            .and_then(
-                [&] { return Check(converter->Initialize(bitmap.Get(), GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom), ApiCall::WicConvertPixels); })
+            .and_then([&] { return Check(converter->Initialize(bitmap.Get(), to, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom), ApiCall::WicConvertPixels); })
             .transform([&converter] { return converter; });
+    };
+
+    // The converted pixels, copied into a bitmap of their own, which is the one thing here that can be drawn on.
+    static constexpr auto HeldOf = [] [[nodiscard]] (IWICImagingFactory * wic, const Com<IWICFormatConverter>& converted) noexcept -> Result<Com<IWICBitmap>, Error> {
+        Com<IWICBitmap> held; // WAIVER(R2): the answer of one call, read once after it.
+        return Check(wic->CreateBitmapFromSource(converted.Get(), WICBitmapCacheOnLoad, &held), ApiCall::WicCreateBitmap).transform([&held] { return held; });
+    };
+
+    // The bitmap is locked for writing for as long as the drawing takes; letting go of the lock is what
+    // hands the pixels back.
+    static constexpr auto Drawn = [] [[nodiscard]] (const Com<IWICBitmap>& held, const Readback& r, const Overlaid& overlaid) noexcept -> Status<Error> {
+        static constexpr auto DrawnOnLock = [] [[nodiscard]] (const Com<IWICBitmapLock>& lock, const Readback& r, const Overlaid& overlaid) noexcept -> Status<Error> {
+            UINT stride = 0; // WAIVER(R2): the answers of two calls, read once after them.
+            UINT bytes = 0;
+            BYTE* rows = nullptr;
+            return Check(lock->GetStride(&stride), ApiCall::WicCreateBitmap).and_then([&] { return Check(lock->GetDataPointer(&bytes, &rows), ApiCall::WicCreateBitmap); }).transform([&] {
+                DrawCursorOnto(rows, stride, SizeOf(r.layout), overlaid.source, *overlaid.cursor);
+            });
+        };
+        if (!overlaid.cursor.has_value())
+            return {};
+        const WICRect whole{ .X = 0, .Y = 0, .Width = static_cast<INT>(r.layout.footprint.Footprint.Width), .Height = static_cast<INT>(r.layout.footprint.Footprint.Height) };
+        Com<IWICBitmapLock> lock; // WAIVER(R2): the answer of one call, read once after it.
+        return Check(held->Lock(&whole, WICBitmapLockWrite, &lock), ApiCall::WicCreateBitmap).and_then([&] { return DrawnOnLock(lock, r, overlaid); });
     };
 
     static constexpr auto StreamOf = [] [[nodiscard]] (IWICImagingFactory * wic, const interior::FilePath& path) noexcept -> Result<Com<IWICStream>, Error> {
@@ -246,25 +283,29 @@ namespace {
                 .and_then([&] { return Check(encoder->Commit(), ApiCall::WicWriteFrame); });
         });
     };
+    static constexpr auto Written = [] [[nodiscard]] (IWICImagingFactory * wic, const Com<IWICFormatConverter>& picture, const Readback& r, const interior::FilePath& path) noexcept -> Status<Error> {
+        return StreamOf(wic, path).and_then(
+            [&](const Com<IWICStream>& stream) { return EncoderOf(wic, stream).and_then([&](const Com<IWICBitmapEncoder>& encoder) { return FrameWritten(encoder, picture, r); }); });
+    };
     return WicFormatOf(readback.layout.footprint.Footprint.Format).and_then([&](const GUID& format) {
-        return BitmapOf(wic, readback, pixels, format).and_then([&](const Com<IWICBitmap>& bitmap) {
-            return ConvertedOf(wic, bitmap).and_then([&](const Com<IWICFormatConverter>& picture) {
-                return StreamOf(wic, path).and_then(
-                    [&](const Com<IWICStream>& stream) { return EncoderOf(wic, stream).and_then([&](const Com<IWICBitmapEncoder>& encoder) { return FrameWritten(encoder, picture, readback); }); });
-            });
-        });
+        return BitmapOf(wic, readback, pixels, format)
+            .and_then([&](const Com<IWICBitmap>& bitmap) { return ConvertedOf(wic, bitmap, GUID_WICPixelFormat32bppBGR); })
+            .and_then([&](const Com<IWICFormatConverter>& converted) { return HeldOf(wic, converted); })
+            .and_then([&](const Com<IWICBitmap>& held) { return Drawn(held, readback, overlaid).and_then([&] { return ConvertedOf(wic, held, GUID_WICPixelFormat24bppBGR); }); })
+            .and_then([&](const Com<IWICFormatConverter>& picture) { return Written(wic, picture, readback, path); });
     });
 }
 
 // The buffer is mapped for as long as the file takes, and unmapped whether or not the file was written.
-[[nodiscard]] Status<Error> WrittenOut(IWICImagingFactory* wic, const Readback& readback, const interior::FilePath& path) noexcept
+[[nodiscard]] Status<Error> WrittenOut(IWICImagingFactory* wic, const Readback& readback, const Overlaid& overlaid, const interior::FilePath& path) noexcept
 {
-    static constexpr auto WrittenThenUnmapped = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& readback, void* mapped, const interior::FilePath& path) noexcept -> Status<Error> {
-        const Status<Error> written = WritePng(wic, readback, mapped, path);
+    static constexpr auto WrittenThenUnmapped = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& readback, void* mapped, const Overlaid& overlaid,
+                                                                  const interior::FilePath& path) noexcept -> Status<Error> {
+        const Status<Error> written = WritePng(wic, readback, mapped, overlaid, path);
         UnmapReadback(readback);
         return written;
     };
-    return MapReadback(readback).and_then([&](void* mapped) { return WrittenThenUnmapped(wic, readback, mapped, path); });
+    return MapReadback(readback).and_then([&](void* mapped) { return WrittenThenUnmapped(wic, readback, mapped, overlaid, path); });
 }
 
 [[nodiscard]] Result<Com<IWICImagingFactory>, Error> WicFactory() noexcept
@@ -275,17 +316,19 @@ namespace {
 
 } // namespace
 
-Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order) noexcept
+Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order, const std::optional<CursorOverlay>& cursor) noexcept
 {
-    static constexpr auto WrittenBoth = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files) noexcept -> Status<Error> {
-        return WicFactory().and_then(
-            [&](const Com<IWICImagingFactory>& wic) { return WrittenOut(wic.Get(), r.original, files.original).and_then([&] { return WrittenOut(wic.Get(), r.processed, files.processed); }); });
+    static constexpr auto WrittenBoth = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files, const std::optional<CursorOverlay>& cursor) noexcept -> Status<Error> {
+        const Overlaid overlaid{ SizeOf(r.original.layout), cursor };
+        return WicFactory().and_then([&](const Com<IWICImagingFactory>& wic) {
+            return WrittenOut(wic.Get(), r.original, overlaid, files.original).and_then([&] { return WrittenOut(wic.Get(), r.processed, overlaid, files.processed); });
+        });
     };
     return EnsureCaptureFolder(order.folder)
         .and_then([&] { return FreeCaptureNames(order.folder, interior::CaptureStemOf(order.label, order.live, order.everything, MomentNow()), kOriginalSuffix, kProcessedSuffix); })
         .and_then([&](const CaptureFiles& files) {
             return CopiedBoth(gpu, frame, after).and_then([&](const Copied& copied) {
-                return WrittenBoth(copied.readbacks, files).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
+                return WrittenBoth(copied.readbacks, files, cursor).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
             });
         });
 }

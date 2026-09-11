@@ -1,4 +1,5 @@
 #pragma once
+#include "effects/real/cursor.h"
 #include "effects/real/snapshot.h"
 
 #include <mfidl.h>
@@ -29,7 +30,8 @@ struct Pending
     Readback original;
     Readback processed;
     interior::Instant when;
-    bool waiting; // copies were recorded and not yet encoded
+    bool waiting;                        // copies were recorded and not yet encoded
+    std::optional<CursorOverlay> cursor; // drawn into both pictures as they are encoded, when the capture left it out and it was asked for
 };
 
 // A recording under way. The tracks open with the first frame, which is what says how big the pictures are;
@@ -62,7 +64,9 @@ struct Stopped
 
 // Copies this frame's two pictures into the slot's buffers on a list of their own, after the frame's, and
 // signals a fence for them; the copies are encoded once that fence has passed and the slot comes round.
-[[nodiscard]] infra::Result<Recorded, Error> RecordFrame(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, interior::Instant now, VideoRecording recording) noexcept;
+// The cursor, when there is one to draw, is kept with the copies and drawn in then.
+[[nodiscard]] infra::Result<Recorded, Error> RecordFrame(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, interior::Instant now,
+                                                         const std::optional<CursorOverlay>& cursor, VideoRecording recording) noexcept;
 
 // Encodes the slot's waiting copies, whose fence the caller has waited for, into both tracks with the same
 // time, so the two pictures of a frame stay together.

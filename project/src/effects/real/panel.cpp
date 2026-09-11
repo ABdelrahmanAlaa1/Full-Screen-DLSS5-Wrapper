@@ -173,6 +173,10 @@ constexpr std::array<ToggleSpec, kToggleCount> kToggles{ {
     { L"Model kernel cache", L"Let the model cache its compiled kernels. Off makes it rebuild them every run. Read as the model loads, so it may need the program restarted.", true, nullptr },
     { L"Always add all parameter values",
       L"Put every parameter into a capture's name, the ones at their defaults included: the mask when it is on, the intensity when it is full, and the passes when there is one.", false, nullptr },
+    { L"Include the mouse cursor",
+      L"Draw the cursor into screenshots and recordings where it was when the frame was taken. Nothing is drawn when the capture carries it already: the View page's cursor set to On, or a "
+      L"source the output does not cover.",
+      false, nullptr },
 } };
 
 // Whether a switch's warning applies. The only switch that carries one is the model's, and what it warns of
@@ -385,7 +389,7 @@ constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
       14,
       { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), kNextColumn,
         Of(List::Adapter), Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
-    { L"Capture", 4, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Action::Screenshot), Of(Action::Record) } },
+    { L"Capture", 5, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Toggle::CaptureCursor), Of(Action::Screenshot), Of(Action::Record) } },
     { L"About", 3, { Of(Note::Title), Of(Note::Purpose), Of(Note::Repository) } },
     { L"Inert", 6, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), kNextColumn, Of(Group::NvofGrid), Of(Group::NvofPerf) } },
 } };
@@ -2546,7 +2550,7 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
         static constexpr auto TakenFrom = [] [[nodiscard]] (const ControlPanel& panel, Action action) noexcept -> bool { return Taken(panel.actions[static_cast<std::size_t>(action)]); };
         const bool fromCapture = TakenFrom(panel, Action::Screenshot);
         const bool fromModel = TakenFrom(panel, Action::ModelScreenshot);
-        return CaptureRequest{ fromCapture || fromModel, TakenFrom(panel, Action::Record), FolderOf(panel), IsOn(panel, Toggle::AllParameters) };
+        return CaptureRequest{ fromCapture || fromModel, TakenFrom(panel, Action::Record), FolderOf(panel), IsOn(panel, Toggle::AllParameters), IsOn(panel, Toggle::CaptureCursor) };
     };
     Arrange(panel);
     const interior::Fraction split = interior::FractionTag::Parse(SettledValue(panel, Field::Split)).value_or(*kCentre);

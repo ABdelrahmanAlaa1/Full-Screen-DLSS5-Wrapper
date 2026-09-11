@@ -225,7 +225,8 @@ using Caption = real::ChoiceText;
                                           .captureCursor = plan.captureCursor,
                                           .followed = FollowedWindow(b),
                                           .asksToBeLeftOut = AsksToBeLeftOut(o, b.geometry),
-                                          .outsideTheSource = !OverlapsSource(o, b.geometry) };
+                                          .outsideTheSource = !OverlapsSource(o, b.geometry),
+                                          .source = b.geometry.sourceRect };
     };
     return CreatedWindow(console, b).and_then([&](real::OutputWindow window) {
         return real::CreateEnvironment(std::move(d.device), std::move(d.runtime), plan, b.geometry, std::move(window), panel, SettingsOf(b, plan), b.options, console);

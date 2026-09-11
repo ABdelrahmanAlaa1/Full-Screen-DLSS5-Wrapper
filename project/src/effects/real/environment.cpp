@@ -210,7 +210,8 @@ RealEnvironment::RealEnvironment(Gpu gpu, const SessionPlan& plan, OutputWindow 
                                  const interior::Options& options, std::uint32_t finestPixels, interior::FenceValue fence, interior::Instant start) noexcept
     : gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
       frame_{ interior::FrameNumberTag::Parse(0), *kZeroSlot, *kZeroSet, false, fence }, stats_{ start, 0, 0 }, applied_(settings), clearedDepth_(plan.depth), restartWanted_(false), resized_(false),
-      pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt), recording_(std::nullopt), now_(start)
+      pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt), recording_(std::nullopt),
+      cursor_(std::nullopt), now_(start)
 {
 }
 
@@ -575,30 +576,35 @@ Status<Error> RealEnvironment::SettledIfRead(const std::optional<PanelReading>& 
     return Settled(*reading);
 }
 
+namespace {
+
+// Whether the capture is told to include the cursor. Auto keeps whatever the session resolved when it started.
+[[nodiscard]] bool CursorCaptured(const interior::SurfaceSettings& surface, bool resolved) noexcept
+{
+    if (surface.cursor == interior::CursorMode::Auto)
+        return resolved;
+    return surface.cursor == interior::CursorMode::On;
+}
+
+} // namespace
+
 Status<Error> RealEnvironment::Resurfaced(const interior::SurfaceSettings& surface) noexcept
 {
     static constexpr auto ApplySurface = [] [[nodiscard]] (const Gpu& gpu, const OutputWindow& window, const EnvironmentSettings& settings) noexcept -> infra::Status<Error> {
-        // Auto keeps whatever the session resolved for the cursor when it started.
-        static constexpr auto CursorWanted = [] [[nodiscard]] (const interior::SurfaceSettings& s, bool resolved) noexcept -> bool {
-            if (s.cursor == interior::CursorMode::Auto)
-                return resolved;
-            return s.cursor == interior::CursorMode::On;
-        };
-
         // The overlay is above everything when it covers a monitor, and just above the window it follows otherwise.
         static constexpr auto WindowSettingsOf = [] [[nodiscard]] (const EnvironmentSettings& settings) noexcept -> WindowSettings {
             return WindowSettings{
                 .topmost = !settings.followed.has_value(), .clickThrough = settings.surface.clickThrough, .excludeFromCapture = settings.surface.displayAffinity, .redirectionBitmap = false
             };
         };
-        return ApplyCaptureSettings(gpu.capture, CaptureSettings{ CursorWanted(settings.surface, settings.captureCursor), settings.surface.captureBorder }).and_then([&] {
+        return ApplyCaptureSettings(gpu.capture, CaptureSettings{ CursorCaptured(settings.surface, settings.captureCursor), settings.surface.captureBorder }).and_then([&] {
             return ApplyWindowSettings(window, WindowSettingsOf(settings));
         });
     };
     if (surface == applied_.surface)
         return {};
     // WAIVER(R2): what has been applied, replaced whole.
-    applied_ = EnvironmentSettings{ surface, applied_.captureCursor, applied_.followed, applied_.asksToBeLeftOut, applied_.outsideTheSource };
+    applied_ = EnvironmentSettings{ surface, applied_.captureCursor, applied_.followed, applied_.asksToBeLeftOut, applied_.outsideTheSource, applied_.source };
     return ApplySurface(gpu_, window_, applied_);
 }
 
@@ -645,6 +651,24 @@ Status<Error> RealEnvironment::Settled(const PanelReading& reading) noexcept
             return std::nullopt;
         return order;
     };
+
+    // The cursor is drawn into captures only when it was asked for and the capture itself leaves it out; one
+    // that carries it already needs nothing drawn. A picture starts where the followed window is now, or
+    // where the source is; a window that has gone gives no cursor this frame.
+    static constexpr auto OverlayOf = [] [[nodiscard]] (const PanelReading& reading, const EnvironmentSettings& applied) noexcept -> std::optional<CursorOverlay> {
+        static constexpr auto TopLeftOf = [] [[nodiscard]] (const interior::ScreenRect& rect) noexcept -> POINT {
+            return POINT{ .x = static_cast<LONG>(rect.Left().Get()), .y = static_cast<LONG>(rect.Top().Get()) };
+        };
+
+        static constexpr auto OriginOf = [] [[nodiscard]] (const EnvironmentSettings& applied) noexcept -> std::optional<POINT> {
+            if (!applied.followed.has_value())
+                return TopLeftOf(applied.source);
+            return BoundsOfWindow(*applied.followed).transform([](const interior::ScreenRect& rect) { return TopLeftOf(rect); });
+        };
+        if (!reading.capture.cursor || CursorCaptured(applied.surface, applied.captureCursor))
+            return std::nullopt;
+        return OriginOf(applied).transform([](const POINT& origin) { return CursorOverlay{ SampleCursor(), origin }; });
+    };
     const interior::SurfaceSettings surface = AsExcluded(reading.surface, NothingToHideFrom(gpu_, applied_));
     const SnapshotOrder order = OrderOf(reading, applied_.followed);
     return Resurfaced(surface)
@@ -652,6 +676,7 @@ Status<Error> RealEnvironment::Settled(const PanelReading& reading) noexcept
         .and_then([this, &reading, &order] { return ToggledRecording(reading, order); })
         .transform([this, &reading, &order] {
             snapshot_ = ScreenshotOf(reading, order); // WAIVER(R2): what this frame's reading asked for, replaced whole each frame.
+            cursor_ = OverlayOf(reading, applied_);   // WAIVER(R2): the cursor this frame's captures get, replaced whole each frame.
         });
 }
 
@@ -747,7 +772,7 @@ Result<ExecutionReport, Error> RealEnvironment::Captured(const interior::FramePl
 {
     if (!snapshot_.has_value())
         return report;
-    return SaveSnapshot(gpu_, frame_, plan.next, *snapshot_).and_then([this, &report](const Snapshot& s) {
+    return SaveSnapshot(gpu_, frame_, plan.next, *snapshot_, cursor_).and_then([this, &report](const Snapshot& s) {
         frame_ = WithFence(frame_, s.fence); // WAIVER(R2): the last signalled fence, replaced whole.
         snapshot_ = std::nullopt;            // WAIVER(R2): the order was taken, so nothing waits.
         return NotedFiles(console_, "screenshot saved", CaptureFiles{ s.original, s.processed }).transform([&] { return ExecutionReport{ s.fence, report.stepsExecuted }; });
@@ -758,7 +783,7 @@ Result<ExecutionReport, Error> RealEnvironment::RecordedFrame(const interior::Fr
 {
     if (!recording_.has_value())
         return report;
-    return RecordFrame(gpu_, frame_, plan.next, now_, std::move(*recording_)).transform([this, &report](Recorded recorded) {
+    return RecordFrame(gpu_, frame_, plan.next, now_, cursor_, std::move(*recording_)).transform([this, &report](Recorded recorded) {
         recording_ = std::move(recorded.recording); // WAIVER(R2): the recording under way, replaced whole.
         frame_ = WithFence(frame_, recorded.fence); // WAIVER(R2): the last signalled fence, replaced whole.
         return ExecutionReport{ recorded.fence, report.stepsExecuted };

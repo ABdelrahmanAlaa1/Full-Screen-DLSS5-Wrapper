@@ -1,4 +1,5 @@
 #pragma once
+#include "effects/real/cursor.h"
 #include "effects/real/executor.h"
 #include "interior/capture_name.h"
 
@@ -46,6 +47,9 @@ struct Snapshot
 
 [[nodiscard]] interior::CaptureMoment MomentNow() noexcept;
 
+// A copied texture's size in pixels.
+[[nodiscard]] FrameSize SizeOf(const Layout& layout) noexcept;
+
 // The folder is made when it is not there; one that is there already is what was wanted.
 [[nodiscard]] infra::Status<Error> EnsureCaptureFolder(const interior::DirectoryPath& folder) noexcept;
 
@@ -65,7 +69,9 @@ void UnmapReadback(const Readback& readback) noexcept;
 
 // Copies the picture the model was given and the picture shown for it out of the GPU, as the frame just
 // submitted left them, and writes both as PNG files named for the settings and the moment. Waits for the
-// copies and for the files, so the frame loop stands still for as long as that takes.
-[[nodiscard]] infra::Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order) noexcept;
+// copies and for the files, so the frame loop stands still for as long as that takes. The cursor, when there
+// is one to draw, goes into both pictures before they are written.
+[[nodiscard]] infra::Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order,
+                                                          const std::optional<CursorOverlay>& cursor) noexcept;
 
 } // namespace real

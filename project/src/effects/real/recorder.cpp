@@ -26,13 +26,14 @@ constexpr LONGLONG kTicksPerMicrosecond = 10; // Media Foundation counts time in
 constexpr LONGLONG kNominalDuration = 10000000 / kNominalFrameRate;
 constexpr UINT64 kBitsPerPixelPerSecond = 7; // 1080p comes to about 14 Mbit/s, 4K to about 58
 constexpr UINT64 kMaxBitrate = 100000000;
-constexpr std::size_t kBytesPerPixel = 4;
 constexpr std::size_t kHalvesPerPixel = 4;
 
-struct FrameSize
+// What is drawn over a picture once it is converted: the cursor, placed for the screen area the picture shows,
+// which is the original picture's size for both pictures of a frame.
+struct Overlaid
 {
-    UINT32 width;
-    UINT32 height;
+    FrameSize source;
+    std::optional<CursorOverlay> cursor;
 };
 
 // The encoder takes no odd size, so a picture with one loses its last column or row.
@@ -41,7 +42,7 @@ struct FrameSize
     return size & ~1u;
 }
 
-[[nodiscard]] FrameSize SizeOf(const Layout& layout) noexcept
+[[nodiscard]] FrameSize EvenSizeOf(const Layout& layout) noexcept
 {
     return FrameSize{ Even(layout.footprint.Footprint.Width), Even(layout.footprint.Footprint.Height) };
 }
@@ -96,7 +97,7 @@ struct FrameSize
             .and_then([&](const Com<IMFMediaType>& input) { return Check(writer->SetInputMediaType(stream, input.Get(), nullptr), ApiCall::MfConfigureStream); })
             .transform([&stream] { return stream; });
     };
-    const FrameSize size = SizeOf(layout);
+    const FrameSize size = EvenSizeOf(layout);
     return WriterFor(file).and_then([&](const Com<IMFSinkWriter>& writer) {
         return StreamOf(writer, size).and_then([&](DWORD stream) { return Check(writer->BeginWriting(), ApiCall::MfBeginWriting).transform([&] { return Track{ writer, stream, file }; }); });
     });
@@ -171,22 +172,29 @@ void ConvertRows(const std::byte* rows, const Layout& layout, const FrameSize& s
     }
 }
 
-[[nodiscard]] Status<Error> WrittenSample(const Track& track, const Readback& readback, const void* rows, LONGLONG time, LONGLONG duration) noexcept
+[[nodiscard]] Status<Error> WrittenSample(const Track& track, const Readback& readback, const void* rows, const Overlaid& overlaid, LONGLONG time, LONGLONG duration) noexcept
 {
-    static constexpr auto BufferOf = [] [[nodiscard]] (const Readback& r, const void* rows, const FrameSize& size) noexcept -> Result<Com<IMFMediaBuffer>, Error> {
-        static constexpr auto Filled = [] [[nodiscard]] (const Com<IMFMediaBuffer>& buffer, const Readback& r, const void* rows, const FrameSize& size, DWORD bytes) noexcept -> Status<Error> {
+    static constexpr auto BufferOf = [] [[nodiscard]] (const Readback& r, const void* rows, const FrameSize& size, const Overlaid& overlaid) noexcept -> Result<Com<IMFMediaBuffer>, Error> {
+        static constexpr auto Drawn = [](BYTE* out, const FrameSize& size, const Overlaid& overlaid) noexcept -> void {
+            if (overlaid.cursor.has_value())
+                DrawCursorOnto(out, size.width * kBytesPerPixel, size, overlaid.source, *overlaid.cursor);
+        };
+
+        static constexpr auto Filled = [] [[nodiscard]] (const Com<IMFMediaBuffer>& buffer, const Readback& r, const void* rows, const FrameSize& size, const Overlaid& overlaid,
+                                                         DWORD bytes) noexcept -> Status<Error> {
             BYTE* out = nullptr; // WAIVER(R2): the answers of one call, read once after it.
             DWORD most = 0;
             DWORD current = 0;
             return Check(buffer->Lock(&out, &most, &current), ApiCall::MfCreateSample).and_then([&] {
                 ConvertRows(static_cast<const std::byte*>(rows), r.layout, size, out);
+                Drawn(out, size, overlaid);
                 (void)buffer->Unlock();
                 return Check(buffer->SetCurrentLength(bytes), ApiCall::MfCreateSample);
             });
         };
         const DWORD bytes = size.width * size.height * static_cast<DWORD>(kBytesPerPixel);
         Com<IMFMediaBuffer> buffer; // WAIVER(R2): the answer of one call, filled by the ones after it.
-        return Check(::MFCreateMemoryBuffer(bytes, &buffer), ApiCall::MfCreateSample).and_then([&] { return Filled(buffer, r, rows, size, bytes); }).transform([&buffer] { return buffer; });
+        return Check(::MFCreateMemoryBuffer(bytes, &buffer), ApiCall::MfCreateSample).and_then([&] { return Filled(buffer, r, rows, size, overlaid, bytes); }).transform([&buffer] { return buffer; });
     };
 
     static constexpr auto SampleOf = [] [[nodiscard]] (const Com<IMFMediaBuffer>& buffer, LONGLONG time, LONGLONG duration) noexcept -> Result<Com<IMFSample>, Error> {
@@ -198,20 +206,21 @@ void ConvertRows(const std::byte* rows, const Layout& layout, const FrameSize& s
             .transform([&sample] { return sample; });
     };
     return Convertible(readback.layout.footprint.Footprint.Format)
-        .and_then([&] { return BufferOf(readback, rows, SizeOf(readback.layout)); })
+        .and_then([&] { return BufferOf(readback, rows, EvenSizeOf(readback.layout), overlaid); })
         .and_then([&](const Com<IMFMediaBuffer>& buffer) { return SampleOf(buffer, time, duration); })
         .and_then([&](const Com<IMFSample>& sample) { return Check(track.writer->WriteSample(track.stream, sample.Get()), ApiCall::MfWriteSample); });
 }
 
 // The copy is mapped for as long as the encoder takes to be handed it, and unmapped either way.
-[[nodiscard]] Status<Error> EncodedCopy(const Track& track, const Readback& readback, LONGLONG time, LONGLONG duration) noexcept
+[[nodiscard]] Status<Error> EncodedCopy(const Track& track, const Readback& readback, const Overlaid& overlaid, LONGLONG time, LONGLONG duration) noexcept
 {
-    static constexpr auto WrittenThenUnmapped = [] [[nodiscard]] (const Track& track, const Readback& readback, const void* rows, LONGLONG time, LONGLONG duration) noexcept -> Status<Error> {
-        const Status<Error> written = WrittenSample(track, readback, rows, time, duration);
+    static constexpr auto WrittenThenUnmapped = [] [[nodiscard]] (const Track& track, const Readback& readback, const void* rows, const Overlaid& overlaid, LONGLONG time,
+                                                                  LONGLONG duration) noexcept -> Status<Error> {
+        const Status<Error> written = WrittenSample(track, readback, rows, overlaid, time, duration);
         UnmapReadback(readback);
         return written;
     };
-    return MapReadback(readback).and_then([&](void* rows) { return WrittenThenUnmapped(track, readback, rows, time, duration); });
+    return MapReadback(readback).and_then([&](void* rows) { return WrittenThenUnmapped(track, readback, rows, overlaid, time, duration); });
 }
 
 [[nodiscard]] Result<Tracks, Error> TracksOf(const VideoRecording& recording, const Pending& pending) noexcept
@@ -246,7 +255,7 @@ void ConvertRows(const std::byte* rows, const Layout& layout, const FrameSize& s
 
 [[nodiscard]] Pending Encoded(const Pending& pending) noexcept
 {
-    return Pending{ pending.original, pending.processed, pending.when, false };
+    return Pending{ pending.original, pending.processed, pending.when, false, pending.cursor };
 }
 
 [[nodiscard]] std::optional<Readback> KeptOf(const std::optional<Pending>& slot, bool original) noexcept
@@ -281,14 +290,15 @@ Result<VideoRecording, Error> StartRecording(const SnapshotOrder& order, interio
         });
 }
 
-Result<Recorded, Error> RecordFrame(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, interior::Instant now, VideoRecording recording) noexcept
+Result<Recorded, Error> RecordFrame(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, interior::Instant now, const std::optional<CursorOverlay>& cursor,
+                                    VideoRecording recording) noexcept
 {
     const std::size_t slot = frame.slot.Get();
     return OpenList(gpu, frame.slot)
         .and_then([&] { return CopiedOut(gpu, interior::SimpleId(interior::ResourceKind::ModelColor), after.states, KeptOf(recording.slots[slot], true)); })
         .and_then([&](const Readback& original) {
             return CopiedOut(gpu, interior::SimpleId(after.displaySource), after.states, KeptOf(recording.slots[slot], false)).transform([&](const Readback& processed) {
-                return Pending{ original, processed, now, true };
+                return Pending{ original, processed, now, true, cursor };
             });
         })
         .and_then([&](const Pending& pending) {
@@ -303,10 +313,11 @@ Result<VideoRecording, Error> DrainedSlot(VideoRecording recording, interior::Fr
         return recording;
     const LONGLONG time = TimeOf(recording, pending->when);
     const LONGLONG duration = DurationOf(recording, pending->when);
+    const Overlaid overlaid{ EvenSizeOf(pending->original.layout), pending->cursor };
     return TracksOf(recording, *pending).and_then([&](const Tracks& tracks) {
-        return EncodedCopy(tracks.original, pending->original, time, duration).and_then([&] { return EncodedCopy(tracks.processed, pending->processed, time, duration); }).transform([&] {
-            return WithSlot(recording, slot.Get(), Encoded(*pending), tracks, pending->when);
-        });
+        return EncodedCopy(tracks.original, pending->original, overlaid, time, duration)
+            .and_then([&] { return EncodedCopy(tracks.processed, pending->processed, overlaid, time, duration); })
+            .transform([&] { return WithSlot(recording, slot.Get(), Encoded(*pending), tracks, pending->when); });
     });
 }
 

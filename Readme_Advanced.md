@@ -73,6 +73,12 @@ off, `_Intensity-N` when the intensity is under 100%, and `_Nx` when the model r
 name already taken gets `_2`, `_3` and so on, the same count on both files. The frame loop stands still
 while the two files are written, so the picture pauses for as long as that takes.
 
+The capture leaves the cursor out when the output covers the source, so the captures have no cursor
+either. **Include the mouse cursor**, off by default, draws it into both files where it was when the frame
+was taken, as Windows draws it, and scaled with the picture when the processed one is bigger than the
+original. When the capture carries the cursor already, with the View page's cursor set to On or a source
+the output does not cover, nothing more is drawn.
+
 **Record video** on the same page records the two pictures as two MP4 files, `_original.mp4` and
 `_processed.mp4`, named the same way, until it is clicked again; the time recorded so far runs beside it.
 Each frame's two pictures are copied out of the GPU together and given the same time in both files, taken

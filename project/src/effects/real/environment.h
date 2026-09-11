@@ -41,6 +41,7 @@ struct EnvironmentSettings
     std::optional<interior::MonitorHandle> followed; // the window the source is, when the source is one window
     bool asksToBeLeftOut;                            // the capture is asked to leave our own windows out of it by name
     bool outsideTheSource;                           // the overlay covers something other than what is being captured
+    interior::ScreenRect source;                     // where what is captured is on the screen, which is where a picture's top-left pixel is
 };
 
 class RealEnvironment final
@@ -131,6 +132,7 @@ private:
     bool abandoned_;                          // WAIVER(R2): set once, when the window being followed stopped being on screen.
     std::optional<SnapshotOrder> snapshot_;   // WAIVER(R2): the screenshot the panel asked for this frame, taken after the frame and cleared then.
     std::optional<VideoRecording> recording_; // WAIVER(R2): the recording under way, replaced whole as frames are added and cleared when it stops.
+    std::optional<CursorOverlay> cursor_;     // WAIVER(R2): the cursor to draw into this frame's captures, replaced whole each frame.
     interior::Instant now_;                   // WAIVER(R2): this frame's clock reading, replaced whole per frame.
 };
 
