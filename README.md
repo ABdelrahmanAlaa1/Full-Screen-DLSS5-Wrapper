@@ -18,6 +18,7 @@ See example screenshots below.
 2. For the latest release, look under Assets, then download `FullScreenWrapperForDLSS5.exe`
 3. Acquire `nvngx_dlssnr.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/DLSS5-Entire-Screen#requirements) section below)
 4. Run the `exe` (no installation required).
+5. By default, it applies to the primary monitor, with more options in the View tab. You can also apply it to a specific selected window.
 
 ## Key Features:
 - It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
@@ -58,8 +59,10 @@ See example screenshots below.
 <img width="2554" height="1585" alt="Oblivion 20x" src="https://github.com/user-attachments/assets/9f2422c9-cc0c-4bff-81cc-02a0c210882b" />
 </p>
 
+------
 
-## Requirements
+
+# Requirements
 
 - You need Nvidia drivers `616.64` or newer.
 - You must acquire `nvngx_dlssnr.dll` yourself and put it next to the app `exe`.
@@ -68,8 +71,10 @@ See example screenshots below.
   - Note: The app will verify the dll's signature to ensure it's the right file either way.
 - Tested on a 50 series GPU. Not sure if it works on other generations.
 
-## Optional:
+### Optional:
 - `nvngx_dlss.dll` - Enables use of super resolution options. Also put that next to the `exe`.
+
+------
 
 # How It Works
 On a simple level, it:
