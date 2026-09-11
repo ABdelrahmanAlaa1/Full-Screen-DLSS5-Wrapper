@@ -16,7 +16,7 @@ See example screenshots below.
 
 1. Go to the [Releases](https://github.com/ThioJoe/DLSS5-Entire-Screen/releases) page.
 2. For the latest release, look under Assets, then download `FullScreenWrapperForDLSS5.exe`
-3. Acquire `nvngx_dlss.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/DLSS5-Entire-Screen#requirements) section below)
+3. Acquire `nvngx_dlssnr.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/DLSS5-Entire-Screen#requirements) section below)
 4. Run the `exe` (no installation required).
 
 ## Key Features:
