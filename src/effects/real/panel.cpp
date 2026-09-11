@@ -1641,12 +1641,17 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
 
                 static constexpr auto BuildGroups = [] [[nodiscard]] (HWND parent, const Metrics& m, const std::array<std::size_t, kGroupCount>& chosen, Built built) noexcept -> Built {
                     static constexpr auto CreateChoices = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t group, std::size_t chosen) noexcept -> std::array<HWND, kMaxChoices> {
+                        // Four choices at the usual width run past the column, and past the window from the right-hand one.
+                        static constexpr auto WidthOfChoice = [] [[nodiscard]] (const Placement& at, std::size_t count) noexcept -> int {
+                            return std::min(kChoiceWidth, at.width / static_cast<int>(count));
+                        };
                         const Placement at = PlaceOfRow(Kind::Group, group, m);
+                        const int width = WidthOfChoice(at, kGroups[group].count);
                         return infra::Generated<HWND, kMaxChoices>([&](std::size_t i) -> HWND {
                             if (i >= kGroups[group].count)
                                 return nullptr;
                             const DWORD style = BS_AUTORADIOBUTTON | (i == 0 ? WS_GROUP : 0u);
-                            const HWND choice = CreateButton(parent, m, kGroups[group].choices[i], style, at.left + static_cast<int>(i) * kChoiceWidth, at.control, kChoiceWidth);
+                            const HWND choice = CreateButton(parent, m, kGroups[group].choices[i], style, at.left + static_cast<int>(i) * width, at.control, width);
                             if (choice != nullptr)
                                 SetChecked(choice, i == chosen);
                             return choice;
