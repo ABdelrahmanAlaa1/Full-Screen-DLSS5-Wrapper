@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 
 namespace tests {
 namespace {
@@ -104,6 +105,21 @@ constexpr float kTolerance = 1e-5f;
     const LiveSettings same = SweepCombination(base, spec, proptest::DrawBelow(rng, 10));
     LiveSettings expected = base;
     expected.neuralRendering = true;
+    // Diagnostic for one compiler: which member differs.
+    if (same != expected)
+    {
+        const NrTuning& a = same.tuning;
+        const NrTuning& b = expected.tuning;
+        std::printf("diag nr=%d/%d preset=%u/%u int=%.9g/%.9g style=%d/%d struc=%.9g/%.9g tone=%.9g/%.9g skin=%.9g/%.9g mask=%d/%d ui=%d/%d passes=%u/%u depthinv=%d/%d mvx=%.9g/%.9g mvy=%.9g/%.9g "
+                    "vsync=%d/%d reset=%.9g/%.9g depth=%.9g/%.9g count=%u\n",
+                    same.neuralRendering, expected.neuralRendering, a.preset.Get(), b.preset.Get(), static_cast<double>(a.intensity.Get()), static_cast<double>(b.intensity.Get()),
+                    static_cast<int>(a.style), static_cast<int>(b.style), static_cast<double>(a.localStructure.Get()), static_cast<double>(b.localStructure.Get()),
+                    static_cast<double>(a.localTone.Get()), static_cast<double>(b.localTone.Get()), static_cast<double>(a.skinStructure.Get()), static_cast<double>(b.skinStructure.Get()), a.autoMask,
+                    b.autoMask, a.uiCorrection, b.uiCorrection, same.passes.Get(), expected.passes.Get(), same.depthInverted, expected.depthInverted, static_cast<double>(same.mvScaleX.Get()),
+                    static_cast<double>(expected.mvScaleX.Get()), static_cast<double>(same.mvScaleY.Get()), static_cast<double>(expected.mvScaleY.Get()), same.vsync, expected.vsync,
+                    static_cast<double>(same.resetThreshold.Get()), static_cast<double>(expected.resetThreshold.Get()), static_cast<double>(same.depth.Get()),
+                    static_cast<double>(expected.depth.Get()), SweepCount(spec));
+    }
     return SweepCount(spec) == 0 && same == expected;
 }
 

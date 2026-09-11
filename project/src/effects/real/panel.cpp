@@ -327,7 +327,10 @@ constexpr std::array<SweepRowSpec, kSweepCount> kSweeps{ {
 
 // A frame is a group box around the rows it names. A break ends a column early, so a page can say which
 // rows stand on the right rather than leaving that to how many happen to fit on the left. A note is text.
-enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break, Note, Folder, Action, Sweep, Progress };
+enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break, Note, Folder, Action, Sweep, Progress, Heading };
+
+// A heading stands over the right-hand column of the rows under it, which is where the count boxes are.
+constexpr std::array<const wchar_t*, kHeadingCount> kHeadings{ L"Values" };
 
 struct RowSpec
 {
@@ -379,10 +382,14 @@ struct RowSpec
 {
     return RowSpec{ Kind::Progress, static_cast<std::size_t>(p) };
 }
+[[nodiscard]] constexpr RowSpec Of(Heading h) noexcept
+{
+    return RowSpec{ Kind::Heading, static_cast<std::size_t>(h) };
+}
 
 constexpr RowSpec kNextColumn{ Kind::Break, 0 };
 
-constexpr std::size_t kMaxFrameRows = 10;
+constexpr std::size_t kMaxFrameRows = 11;
 
 struct FrameSpec
 {
@@ -399,8 +406,8 @@ constexpr std::array<FrameSpec, kFrameCount> kFrames{ {
     { L"Skin", 3, { Of(Toggle::AutoMask), Of(Toggle::SkinFollowsStructure), Of(Field::Skin) } },
     { L"Compare", 2, { Of(Group::Compare), Of(Field::Split) } },
     { L"Settings comparison capture",
-      10,
-      { Of(Note::Comparison), Of(interior::SweepParameter::Intensity), Of(interior::SweepParameter::LocalStructure), Of(interior::SweepParameter::LocalTone),
+      11,
+      { Of(Note::Comparison), Of(Heading::Values), Of(interior::SweepParameter::Intensity), Of(interior::SweepParameter::LocalStructure), Of(interior::SweepParameter::LocalTone),
         Of(interior::SweepParameter::SkinStructure), Of(interior::SweepParameter::Style), Of(interior::SweepParameter::AutoMask), Of(interior::SweepParameter::Passes), Of(Action::Compare),
         Of(Progress::Comparison) } },
 } };
@@ -493,6 +500,7 @@ static_assert(RowsOfKind(Kind::Folder) == kFolderCount);
 static_assert(RowsOfKind(Kind::Action) == kActionCount);
 static_assert(RowsOfKind(Kind::Sweep) == kSweepCount);
 static_assert(RowsOfKind(Kind::Progress) == kProgressCount);
+static_assert(RowsOfKind(Kind::Heading) == kHeadingCount);
 static_assert(FramesAreFlat());
 static_assert(PagesBreakOnce());
 
@@ -556,6 +564,8 @@ struct Placement
             return m.NoteHeight(kNotes[row.index].lines) + m.RowGap();
         if (row.kind == Kind::Action || row.kind == Kind::Sweep || row.kind == Kind::Progress)
             return m.ControlHeight() + m.RowGap();
+        if (row.kind == Kind::Heading)
+            return m.LabelHeight();
         return m.RowHeight();
     };
 
@@ -616,7 +626,7 @@ struct Walk
 [[nodiscard]] Placement PlaceOf(const RowSpec& row, const Cell& at, const Metrics& m) noexcept
 {
     static constexpr auto StandsWithoutLabel = [] [[nodiscard]] (Kind kind) noexcept -> bool {
-        return kind == Kind::Toggle || kind == Kind::Note || kind == Kind::Action || kind == Kind::Sweep || kind == Kind::Progress;
+        return kind == Kind::Toggle || kind == Kind::Note || kind == Kind::Action || kind == Kind::Sweep || kind == Kind::Progress || kind == Kind::Heading;
     };
     const int top = m.PageTop() + at.offset;
     const int control = StandsWithoutLabel(row.kind) ? top : top + m.LabelHeight();
@@ -1144,6 +1154,7 @@ struct Built
     std::array<HWND, kSweepCount> sweepSpins;
     HWND comparisonLabel;
     std::array<HWND, kProgressCount> progress;
+    std::array<HWND, kHeadingCount> headings;
 };
 
 [[nodiscard]] LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) noexcept;
@@ -1413,6 +1424,8 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
                 ShowAll(ControlsOfSweep(panel, row.index), how);
             else if (row.kind == Kind::Progress)
                 ShowOne(panel.progress[row.index], how);
+            else if (row.kind == Kind::Heading)
+                ShowOne(panel.headings[row.index], how);
         };
 
         // A frame is shown with the rows inside it; a break has nothing to show.
@@ -2251,7 +2264,14 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         const Placement at = PlaceOfRow(Kind::Progress, p, m);
                         return CreateChild(parent, PROGRESS_CLASSW, nullptr, PBS_SMOOTH, 0, Bounds(m, at.left, at.control, at.width, m.ControlHeight()));
                     };
+
+                    // A heading sits over the count boxes, ending where they end.
+                    static constexpr auto CreateHeading = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t h) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Heading, h, m);
+                        return CreateChild(parent, WC_STATICW, kHeadings[h], SS_RIGHT, 0, Bounds(m, at.left + at.width - kValuesWidth - kMargin, at.top, kValuesWidth + kMargin, m.LabelHeight()));
+                    };
                     built.progress = infra::Generated<HWND, kProgressCount>([&](std::size_t p) { return CreateBar(parent, m, p); });
+                    built.headings = infra::Generated<HWND, kHeadingCount>([&](std::size_t h) { return CreateHeading(parent, m, h); });
                     return built;
                 };
                 const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), findings, BuildFields(parent, m, StartingValues(o, live), Built{}));
@@ -2329,6 +2349,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.sweepSpins,
                                  built.comparisonLabel,
                                  built.progress,
+                                 built.headings,
                                  o.displayAffinity,
                                  o.clickThrough,
                                  findings.superResolution,
@@ -2351,10 +2372,10 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
 
                     static constexpr auto EveryRowPresent = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> bool {
                         // Every span here points into the panel itself, which outlives the answer.
-                        static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 19> {
-                            return { panel.labels,      panel.sliders,        panel.boxes,     panel.spins,       panel.resets,  panel.toggles, panel.groupLabels,
-                                     panel.pickLabels,  panel.crosshairs,     panel.pickNames, panel.pickResets,  panel.frames,  panel.notes,   panel.folderLabels,
-                                     panel.folderBoxes, panel.folderBrowsers, panel.actions,   panel.sweepChecks, panel.progress };
+                        static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 20> {
+                            return { panel.labels,      panel.sliders,        panel.boxes,     panel.spins,       panel.resets,   panel.toggles, panel.groupLabels,
+                                     panel.pickLabels,  panel.crosshairs,     panel.pickNames, panel.pickResets,  panel.frames,   panel.notes,   panel.folderLabels,
+                                     panel.folderBoxes, panel.folderBrowsers, panel.actions,   panel.sweepChecks, panel.progress, panel.headings };
                         };
                         return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs) && IsPresent(panel.recordingLabel) && IsPresent(panel.comparisonLabel);
                     };
@@ -2557,6 +2578,8 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
                             return panel.sweepChecks[row.index];
                         if (row.kind == Kind::Progress)
                             return panel.progress[row.index];
+                        if (row.kind == Kind::Heading)
+                            return panel.headings[row.index];
                         return MarkerOfRow(panel, row);
                     };
 

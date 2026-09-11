@@ -65,6 +65,9 @@ enum class Note : std::size_t { Title, Purpose, Repository, Comparison, Count };
 // A bar that fills as a comparison capture goes along.
 enum class Progress : std::size_t { Comparison, Count };
 
+// A word over a column of controls, saying what the column holds.
+enum class Heading : std::size_t { Values, Count };
+
 // A folder the operator names, typed into a box or browsed for.
 enum class Folder : std::size_t { Captures, Count };
 
@@ -82,6 +85,7 @@ constexpr std::size_t kFolderCount = static_cast<std::size_t>(Folder::Count);
 constexpr std::size_t kActionCount = static_cast<std::size_t>(Action::Count);
 constexpr std::size_t kSweepCount = interior::kSweepParameterCount;
 constexpr std::size_t kProgressCount = static_cast<std::size_t>(Progress::Count);
+constexpr std::size_t kHeadingCount = static_cast<std::size_t>(Heading::Count);
 constexpr std::size_t kListCount = static_cast<std::size_t>(List::Count);
 constexpr std::size_t kMaxListChoices = 20;
 constexpr std::size_t kMaxChoices = 4;
@@ -151,6 +155,7 @@ struct ControlPanel
     std::array<HWND, kSweepCount> sweepSpins;
     HWND comparisonLabel; // how many pictures a comparison capture would take, or how far the one under way has got
     std::array<HWND, kProgressCount> progress;
+    std::array<HWND, kHeadingCount> headings;
     // Two settings the panel carries but does not show: off, each spoils the picture rather than changing
     // it, so they are the command line's to set and the panel's to pass on unaltered.
     bool displayAffinity;
