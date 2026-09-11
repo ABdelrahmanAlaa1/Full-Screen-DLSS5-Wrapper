@@ -21,26 +21,6 @@ constexpr wchar_t kOriginalSuffix[] = L"_original.png";
 constexpr wchar_t kProcessedSuffix[] = L"_processed.png";
 constexpr wchar_t kReadbackName[] = L"Snapshot readback";
 
-struct Files
-{
-    interior::FilePath original;
-    interior::FilePath processed;
-};
-
-// How a texture's rows lie in the buffer they are copied to: each row padded to the alignment the copy needs.
-struct Layout
-{
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
-    std::uint64_t bytes;
-};
-
-// A texture copied out of the GPU, and where its rows are.
-struct Readback
-{
-    Com<ID3D12Resource> buffer;
-    Layout layout;
-};
-
 struct Readbacks
 {
     Readback original;
@@ -53,20 +33,23 @@ struct Copied
     interior::FenceValue fence;
 };
 
-[[nodiscard]] interior::CaptureMoment MomentNow() noexcept
+} // namespace
+
+interior::CaptureMoment MomentNow() noexcept
 {
     SYSTEMTIME now{}; // WAIVER(R2): the answer of one query, read once after it.
     ::GetLocalTime(&now);
     return interior::CaptureMoment{ now.wMonth, now.wDay, now.wHour, now.wMinute };
 }
 
-// The folder is made when it is not there; one that is there already is what was wanted.
-[[nodiscard]] Status<Error> EnsureFolder(const interior::DirectoryPath& folder) noexcept
+Status<Error> EnsureCaptureFolder(const interior::DirectoryPath& folder) noexcept
 {
     if (::CreateDirectoryW(folder.CString(), nullptr) != FALSE || ::GetLastError() == ERROR_ALREADY_EXISTS)
         return {};
     return Fail(LastError(ApiCall::CreateCaptureFolder));
 }
+
+namespace {
 
 [[nodiscard]] Result<interior::FilePath, Error> PathOf(const interior::DirectoryPath& folder, const interior::CaptureStem& stem, const wchar_t* suffix) noexcept
 {
@@ -82,24 +65,28 @@ struct Copied
     return ::GetFileAttributesW(path.CString()) != INVALID_FILE_ATTRIBUTES;
 }
 
-// Both files of a capture take the same count, so the pair stays a pair: a count is free only when neither
-// file with it is there. A name that cannot be made ends the search with its own error.
-[[nodiscard]] Result<Files, Error> FreeNames(const interior::DirectoryPath& folder, const interior::CaptureStem& stem) noexcept
+} // namespace
+
+Result<CaptureFiles, Error> FreeCaptureNames(const interior::DirectoryPath& folder, const interior::CaptureStem& stem, const wchar_t* originalSuffix, const wchar_t* processedSuffix) noexcept
 {
-    static constexpr auto NamesAt = [] [[nodiscard]] (const interior::DirectoryPath& folder, const interior::CaptureStem& stem, std::uint32_t attempt) noexcept -> Result<Files, Error> {
+    const auto NamesAt = [originalSuffix, processedSuffix](const interior::DirectoryPath& folder, const interior::CaptureStem& stem, std::uint32_t attempt) noexcept -> Result<CaptureFiles, Error> {
         const interior::CaptureStem numbered = interior::NumberedStem(stem, attempt);
-        return PathOf(folder, numbered, kOriginalSuffix).and_then([&](const interior::FilePath& original) {
-            return PathOf(folder, numbered, kProcessedSuffix).transform([&](const interior::FilePath& processed) { return Files{ original, processed }; });
+        return PathOf(folder, numbered, originalSuffix).and_then([&](const interior::FilePath& original) {
+            return PathOf(folder, numbered, processedSuffix).transform([&](const interior::FilePath& processed) { return CaptureFiles{ original, processed }; });
         });
     };
 
-    static constexpr auto IsFree = [] [[nodiscard]] (const Result<Files, Error>& names) noexcept -> bool { return !names.has_value() || (!Exists(names->original) && !Exists(names->processed)); };
+    static constexpr auto IsFree = [] [[nodiscard]] (const Result<CaptureFiles, Error>& names) noexcept -> bool {
+        return !names.has_value() || (!Exists(names->original) && !Exists(names->processed));
+    };
     const auto attempts = std::views::iota(std::uint32_t{ 1 }, kMaxAttempts + 1);
     const auto found = std::ranges::find_if(attempts, [&](std::uint32_t attempt) { return IsFree(NamesAt(folder, stem, attempt)); });
     if (found == attempts.end())
         return Fail(Error{ ApiCall::CaptureNameTaken, 0 });
     return NamesAt(folder, stem, *found);
 }
+
+namespace {
 
 [[nodiscard]] Layout LayoutOf(const GpuDevice& gpu, ID3D12Resource* texture) noexcept
 {
@@ -144,27 +131,48 @@ void RecordCopyOut(ID3D12GraphicsCommandList* list, ID3D12Resource* texture, ID3
     Handed(list, texture, interior::ResourceState::CopySource, state);
 }
 
-[[nodiscard]] Result<Readback, Error> CopiedOut(const Gpu& gpu, const interior::ResourceId& id, const interior::StateTable& states) noexcept
+} // namespace
+
+Result<Readback, Error> CopiedOut(const Gpu& gpu, const interior::ResourceId& id, const interior::StateTable& states, const std::optional<Readback>& kept) noexcept
 {
+    static constexpr auto BufferFor = [] [[nodiscard]] (const GpuDevice& device, const Layout& layout, const std::optional<Readback>& kept) noexcept -> Result<Com<ID3D12Resource>, Error> {
+        if (kept.has_value() && kept->layout.bytes == layout.bytes)
+            return kept->buffer;
+        return CreateBuffer(device, interior::ByteCountTag::Parse(static_cast<std::uint32_t>(layout.bytes)), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_NONE,
+                            kReadbackName);
+    };
     return Lookup(gpu.resources, id).and_then([&](ID3D12Resource* texture) {
         const Layout layout = LayoutOf(gpu.device, texture);
-        return CreateBuffer(gpu.device, interior::ByteCountTag::Parse(static_cast<std::uint32_t>(layout.bytes)), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_NONE,
-                            kReadbackName)
-            .transform([&](const Com<ID3D12Resource>& buffer) {
-                RecordCopyOut(gpu.list.Get(), texture, buffer.Get(), layout, interior::StateOf(states, id));
-                return Readback{ buffer, layout };
-            });
+        return BufferFor(gpu.device, layout, kept).transform([&](const Com<ID3D12Resource>& buffer) {
+            RecordCopyOut(gpu.list.Get(), texture, buffer.Get(), layout, interior::StateOf(states, id));
+            return Readback{ buffer, layout };
+        });
     });
 }
+
+Result<void*, Error> MapReadback(const Readback& readback) noexcept
+{
+    void* mapped = nullptr; // WAIVER(R2): the answer of one call, read once after it.
+    const D3D12_RANGE range{ 0, static_cast<SIZE_T>(readback.layout.bytes) };
+    return Check(readback.buffer->Map(0, &range, &mapped), ApiCall::MapResource).transform([&mapped] { return mapped; });
+}
+
+void UnmapReadback(const Readback& readback) noexcept
+{
+    const D3D12_RANGE noWrite{ 0, 0 };
+    readback.buffer->Unmap(0, &noWrite);
+}
+
+namespace {
 
 // Both copies go into one list after the frame's own, and the list is waited for, so the buffers hold the
 // pictures by the time they are read.
 [[nodiscard]] Result<Copied, Error> CopiedBoth(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after) noexcept
 {
     return OpenList(gpu, frame.slot)
-        .and_then([&] { return CopiedOut(gpu, interior::SimpleId(interior::ResourceKind::ModelColor), after.states); })
+        .and_then([&] { return CopiedOut(gpu, interior::SimpleId(interior::ResourceKind::ModelColor), after.states, std::nullopt); })
         .and_then([&](const Readback& original) {
-            return CopiedOut(gpu, interior::SimpleId(after.displaySource), after.states).transform([&](const Readback& processed) { return Readbacks{ original, processed }; });
+            return CopiedOut(gpu, interior::SimpleId(after.displaySource), after.states, std::nullopt).transform([&](const Readback& processed) { return Readbacks{ original, processed }; });
         })
         .and_then([&](const Readbacks& readbacks) { return FlushList(gpu, frame.fence).transform([&readbacks](interior::FenceValue fence) { return Copied{ readbacks, fence }; }); });
 }
@@ -253,13 +261,10 @@ void RecordCopyOut(ID3D12GraphicsCommandList* list, ID3D12Resource* texture, ID3
 {
     static constexpr auto WrittenThenUnmapped = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& readback, void* mapped, const interior::FilePath& path) noexcept -> Status<Error> {
         const Status<Error> written = WritePng(wic, readback, mapped, path);
-        const D3D12_RANGE noWrite{ 0, 0 };
-        readback.buffer->Unmap(0, &noWrite);
+        UnmapReadback(readback);
         return written;
     };
-    void* mapped = nullptr; // WAIVER(R2): the answer of one call, read once after it.
-    const D3D12_RANGE range{ 0, static_cast<SIZE_T>(readback.layout.bytes) };
-    return Check(readback.buffer->Map(0, &range, &mapped), ApiCall::MapResource).and_then([&] { return WrittenThenUnmapped(wic, readback, mapped, path); });
+    return MapReadback(readback).and_then([&](void* mapped) { return WrittenThenUnmapped(wic, readback, mapped, path); });
 }
 
 [[nodiscard]] Result<Com<IWICImagingFactory>, Error> WicFactory() noexcept
@@ -272,13 +277,13 @@ void RecordCopyOut(ID3D12GraphicsCommandList* list, ID3D12Resource* texture, ID3
 
 Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order) noexcept
 {
-    static constexpr auto WrittenBoth = [] [[nodiscard]] (const Readbacks& r, const Files& files) noexcept -> Status<Error> {
+    static constexpr auto WrittenBoth = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files) noexcept -> Status<Error> {
         return WicFactory().and_then(
             [&](const Com<IWICImagingFactory>& wic) { return WrittenOut(wic.Get(), r.original, files.original).and_then([&] { return WrittenOut(wic.Get(), r.processed, files.processed); }); });
     };
-    return EnsureFolder(order.folder)
-        .and_then([&] { return FreeNames(order.folder, interior::CaptureStemOf(order.label, order.live, order.everything, MomentNow())); })
-        .and_then([&](const Files& files) {
+    return EnsureCaptureFolder(order.folder)
+        .and_then([&] { return FreeCaptureNames(order.folder, interior::CaptureStemOf(order.label, order.live, order.everything, MomentNow()), kOriginalSuffix, kProcessedSuffix); })
+        .and_then([&](const CaptureFiles& files) {
             return CopiedBoth(gpu, frame, after).and_then([&](const Copied& copied) {
                 return WrittenBoth(copied.readbacks, files).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
             });

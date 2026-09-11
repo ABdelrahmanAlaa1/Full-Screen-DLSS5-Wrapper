@@ -2,15 +2,38 @@
 #include "effects/real/executor.h"
 #include "interior/capture_name.h"
 
+#include <optional>
+
 namespace real {
 
-// What a screenshot is asked for with: where to put it, what to call it, and what shaped the picture.
+// What a capture is asked for with: where to put it, what to call it, and what shaped the picture.
 struct SnapshotOrder
 {
     interior::DirectoryPath folder;
     interior::CaptureLabel label;
     interior::LiveSettings live;
     bool everything; // every parameter goes into the name, the ones at their defaults included
+};
+
+// The two files a capture is written to.
+struct CaptureFiles
+{
+    interior::FilePath original;
+    interior::FilePath processed;
+};
+
+// How a texture's rows lie in the buffer they are copied to: each row padded to the alignment the copy needs.
+struct Layout
+{
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+    std::uint64_t bytes;
+};
+
+// A texture copied out of the GPU, and where its rows are.
+struct Readback
+{
+    Com<ID3D12Resource> buffer;
+    Layout layout;
 };
 
 // The two files a screenshot became, and the fence the copies out of the GPU were waited for at.
@@ -20,6 +43,25 @@ struct Snapshot
     interior::FilePath processed;
     interior::FenceValue fence;
 };
+
+[[nodiscard]] interior::CaptureMoment MomentNow() noexcept;
+
+// The folder is made when it is not there; one that is there already is what was wanted.
+[[nodiscard]] infra::Status<Error> EnsureCaptureFolder(const interior::DirectoryPath& folder) noexcept;
+
+// Both files of a capture take the same count, so the pair stays a pair: a count is free only when neither
+// file with it is there. A name that cannot be made ends the search with its own error.
+[[nodiscard]] infra::Result<CaptureFiles, Error> FreeCaptureNames(const interior::DirectoryPath& folder, const interior::CaptureStem& stem, const wchar_t* originalSuffix,
+                                                                  const wchar_t* processedSuffix) noexcept;
+
+// Records a copy of the texture into a readback buffer on the open command list, handing the texture over
+// and giving it back in the state the frame left it. A buffer kept from before is used again when it is the
+// size the texture needs; otherwise one is made.
+[[nodiscard]] infra::Result<Readback, Error> CopiedOut(const Gpu& gpu, const interior::ResourceId& id, const interior::StateTable& states, const std::optional<Readback>& kept) noexcept;
+
+// The rows of a copy, once its fence has been waited for; unmapped when they have been read.
+[[nodiscard]] infra::Result<void*, Error> MapReadback(const Readback& readback) noexcept;
+void UnmapReadback(const Readback& readback) noexcept;
 
 // Copies the picture the model was given and the picture shown for it out of the GPU, as the frame just
 // submitted left them, and writes both as PNG files named for the settings and the moment. Waits for the
