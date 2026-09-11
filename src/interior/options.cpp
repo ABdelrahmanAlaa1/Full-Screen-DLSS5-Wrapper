@@ -383,7 +383,7 @@ Options DefaultOptions() noexcept
         DirectoryPath{},
         std::nullopt,
         *kDefaultProjectId,
-        NgxLogLevel::On,
+        NgxLogLevel::Off,
         DirectoryPath{},
         true,
         true,

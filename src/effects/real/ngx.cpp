@@ -72,7 +72,13 @@ constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + s
     return s.featurePath.IsEmpty() ? 1u : 2u;
 }
 
-[[nodiscard]] NVSDK_NGX_FeatureCommonInfo CommonInfoOf(const std::array<const wchar_t*, 2>& pointers, unsigned int count, interior::NgxLogLevel level) noexcept
+// Where NGX's own log lines go when nobody asked for them: nowhere. The level is a floor rather than a
+// ceiling ("if this is higher than the logging level otherwise configured, this will override that logging
+// level"), so asking for OFF does not stop the driver writing its files; only disabling the other sinks
+// does, and NGX takes that instruction only from a session that hands it a callback to write to instead.
+void NVSDK_CONV DiscardNgxLine(const char*, NVSDK_NGX_Logging_Level, NVSDK_NGX_Feature) noexcept {}
+
+[[nodiscard]] NVSDK_NGX_LoggingInfo LoggingOf(interior::NgxLogLevel level) noexcept
 {
     static constexpr auto LoggingLevelOf = [] [[nodiscard]] (interior::NgxLogLevel level) noexcept -> NVSDK_NGX_Logging_Level {
         switch (level)
@@ -83,9 +89,16 @@ constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + s
         }
         return NVSDK_NGX_LOGGING_LEVEL_OFF;
     };
+    if (level == interior::NgxLogLevel::Off)
+        return NVSDK_NGX_LoggingInfo{ &DiscardNgxLine, NVSDK_NGX_LOGGING_LEVEL_OFF, true };
+    return NVSDK_NGX_LoggingInfo{ nullptr, LoggingLevelOf(level), false };
+}
+
+[[nodiscard]] NVSDK_NGX_FeatureCommonInfo CommonInfoOf(const std::array<const wchar_t*, 2>& pointers, unsigned int count, interior::NgxLogLevel level) noexcept
+{
     NVSDK_NGX_FeatureCommonInfo info{};
     info.PathListInfo = NVSDK_NGX_PathListInfo{ pointers.data(), count };
-    info.LoggingInfo = NVSDK_NGX_LoggingInfo{ nullptr, LoggingLevelOf(level), false };
+    info.LoggingInfo = LoggingOf(level);
     return info;
 }
 

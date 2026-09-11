@@ -195,9 +195,12 @@ if neural rendering is requested and unavailable, the tool exits instead of runn
 trace ring to `FullScreenWrapperForDLSS5-trace.txt` next to the working directory. That file is written
 only when a contract fails, which is to say when the program is already stopping.
 
-Nothing else is written beside the executable unless it is asked for: `--exclusion-log on` writes what the
-capture was asked to leave out and what it answered to `FullScreenWrapperForDLSS5-exclusion.log`, and
-`--log-file PATH` mirrors the console log to a file of your choosing. Neither happens by default.
+Nothing else is written beside the executable unless it is asked for. `--exclusion-log on` writes what the
+capture was asked to leave out and what it answered to `FullScreenWrapperForDLSS5-exclusion.log`;
+`--log-file PATH` mirrors the console log to a file of your choosing; and `--ngx-log 1` or `2` lets NGX
+write its own logs, which it does beside the executable or in `--app-data`. None of the three happens by
+default: NGX is handed a callback that keeps nothing and told to write to no other sink, because its
+logging level alone is a floor that cannot lower what the driver has configured.
 
 ## What the model does with these values
 

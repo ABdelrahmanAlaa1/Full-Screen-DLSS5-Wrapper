@@ -219,7 +219,7 @@ constexpr std::array<std::pair<std::wstring_view, bool>, 8> kSpellings{
 [[nodiscard]] bool DefaultCaptureMatchesTheDocumentation(const Options& d) noexcept
 {
     return d.source.kind == MonitorSelectionKind::Primary && !d.target.has_value() && d.cursor == CursorMode::Auto && d.vsync && d.compare == CompareMode::Off && d.format == ColorFormat::Rgba8 &&
-           !d.captureBorder && d.ngxLogLevel == NgxLogLevel::On && !d.ngxAppId.has_value() && d.ngxPath.IsEmpty() && d.appDataPath.IsEmpty();
+           !d.captureBorder && d.ngxLogLevel == NgxLogLevel::Off && !d.ngxAppId.has_value() && d.ngxPath.IsEmpty() && d.appDataPath.IsEmpty();
 }
 
 [[nodiscard]] bool DefaultWindowMatchesTheDocumentation(const Options& d) noexcept
