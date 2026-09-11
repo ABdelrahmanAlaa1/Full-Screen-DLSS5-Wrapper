@@ -36,4 +36,7 @@ constexpr std::string_view kWindowLabel = "Window";
 // The same name with a count on the end, for when the first is taken. The first attempt is the name itself.
 [[nodiscard]] CaptureStem NumberedStem(const CaptureStem& stem, std::uint32_t attempt) noexcept;
 
+// Where captures go unless the operator says otherwise: a Captures folder next to the executable.
+[[nodiscard]] DirectoryPath DefaultCaptureFolder(const DirectoryPath& executableDirectory) noexcept;
+
 } // namespace interior

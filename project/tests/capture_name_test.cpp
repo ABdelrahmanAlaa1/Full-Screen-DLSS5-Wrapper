@@ -120,11 +120,19 @@ using namespace interior;
     return numbered.Get() == std::string(stem.Get()) + "_" + std::to_string(attempt);
 }
 
+[[nodiscard]] bool TheDefaultFolderIsCapturesBesideTheExecutable(infra::RngState& rng) noexcept
+{
+    const std::wstring directory = std::wstring(L"C:\\Games\\") + std::wstring(proptest::DrawBelow(rng, 20), L'x');
+    const DirectoryPath folder = DefaultCaptureFolder(DirectoryPath::Parse(directory).value_or(DirectoryPath{}));
+    return folder.Get() == directory + L"\\Captures";
+}
+
 } // namespace
 
 std::uint32_t CaptureNameSuite(std::uint64_t seed) noexcept
 {
     std::uint32_t failures = 0;
+    failures += Failures(proptest::ForAll("The default folder is Captures beside the executable", seed, 100, TheDefaultFolderIsCapturesBesideTheExecutable));
     failures += Failures(proptest::ForAll("The label keeps only letters and digits", seed, 300, TheLabelKeepsOnlyLettersAndDigits));
     failures += Failures(proptest::ForAll("The stem names the mask as it is", seed, 300, TheStemNamesTheMaskAsItIs));
     failures += Failures(proptest::ForAll("The stem gives skin only when it counts", seed, 300, TheStemGivesSkinOnlyWhenItCounts));

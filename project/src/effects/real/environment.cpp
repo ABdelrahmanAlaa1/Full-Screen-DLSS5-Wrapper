@@ -210,7 +210,7 @@ RealEnvironment::RealEnvironment(Gpu gpu, const SessionPlan& plan, OutputWindow 
                                  const interior::Options& options, std::uint32_t finestPixels, interior::FenceValue fence, interior::Instant start) noexcept
     : gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
       frame_{ interior::FrameNumberTag::Parse(0), *kZeroSlot, *kZeroSet, false, fence }, stats_{ start, 0, 0 }, applied_(settings), clearedDepth_(plan.depth), restartWanted_(false), resized_(false),
-      pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false)
+      pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt)
 {
 }
 
@@ -619,8 +619,21 @@ Status<Error> RealEnvironment::Settled(const PanelReading& reading) noexcept
         };
         return excluding ? WithoutAffinity(s) : s;
     };
+    // A screenshot asked for is named for what is being captured: the window followed, or the desktop.
+    static constexpr auto OrderOf = [] [[nodiscard]] (const PanelReading& reading, const std::optional<interior::MonitorHandle>& followed) noexcept -> std::optional<SnapshotOrder> {
+        static constexpr auto LabelOf = [] [[nodiscard]] (const std::optional<interior::MonitorHandle>& followed) noexcept -> interior::CaptureLabel {
+            if (!followed.has_value())
+                return interior::CaptureLabel::Parse(interior::kDesktopLabel).value_or(interior::CaptureLabel{});
+            return interior::CaptureLabelOf(TitleOfWindow(*followed).Get());
+        };
+        if (!reading.capture.screenshot)
+            return std::nullopt;
+        return SnapshotOrder{ reading.capture.folder, LabelOf(followed), reading.live, reading.capture.everything };
+    };
     const interior::SurfaceSettings surface = AsExcluded(reading.surface, NothingToHideFrom(gpu_, applied_));
-    return Resurfaced(surface).and_then([this, &reading] { return Recleared(reading.live.depth); });
+    return Resurfaced(surface).and_then([this, &reading] { return Recleared(reading.live.depth); }).transform([this, &reading] {
+        snapshot_ = OrderOf(reading, applied_.followed); // WAIVER(R2): what this frame's reading asked for, replaced whole each frame.
+    });
 }
 
 std::optional<interior::CommandLine> RealEnvironment::Restart(const interior::Options& options) const noexcept
@@ -663,9 +676,25 @@ Result<ExecutionReport, Error> RealEnvironment::Ran(const interior::FramePlan& p
     return ExecutionReport{ *fence, static_cast<std::uint32_t>(plan.steps.Size()) };
 }
 
+Result<ExecutionReport, Error> RealEnvironment::Captured(const interior::FramePlan& plan, const ExecutionReport& report) noexcept
+{
+    static constexpr auto Noted = [] [[nodiscard]] (const Console& console, const Snapshot& s) noexcept -> Status<Error> {
+        const std::array<char, interior::FilePath::Capacity + 1> original = infra::NarrowedChars<interior::FilePath::Capacity + 1>(s.original.Get());
+        const std::array<char, interior::FilePath::Capacity + 1> processed = infra::NarrowedChars<interior::FilePath::Capacity + 1>(s.processed.Get());
+        return Log(console, interior::LogLevel::Info, infra::Formatted<720>("screenshot saved: {} and {}", original.data(), processed.data()).Get());
+    };
+    if (!snapshot_.has_value())
+        return report;
+    return SaveSnapshot(gpu_, frame_, plan.next, *snapshot_).and_then([this, &report](const Snapshot& s) {
+        frame_ = WithFence(frame_, s.fence); // WAIVER(R2): the last signalled fence, replaced whole.
+        snapshot_ = std::nullopt;            // WAIVER(R2): the order was taken, so nothing waits.
+        return Noted(console_, s).transform([&] { return ExecutionReport{ s.fence, report.stepsExecuted }; });
+    });
+}
+
 Result<ExecutionReport, Error> RealEnvironment::Execute(const interior::FramePlan& plan) noexcept
 {
-    return Retuned(plan.next.controls).and_then([this, &plan](const ExecutionReport&) { return Ran(plan); });
+    return Retuned(plan.next.controls).and_then([this, &plan](const ExecutionReport&) { return Ran(plan); }).and_then([this, &plan](const ExecutionReport& report) { return Captured(plan, report); });
 }
 
 Error RealEnvironment::FromPlanError(interior::PlanFrameError error) noexcept

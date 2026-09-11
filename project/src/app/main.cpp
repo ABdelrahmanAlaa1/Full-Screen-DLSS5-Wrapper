@@ -12,6 +12,7 @@
 #include "infrastructure/array_util.h"
 #include "infrastructure/fold.h"
 #include "infrastructure/text.h"
+#include "interior/capture_name.h"
 #include "interior/driver.h"
 #include "interior/monitors.h"
 #include "interior/options.h"
@@ -641,6 +642,7 @@ struct Ended
                                         .superResolution = OffersSuperResolution(d),
                                         .opticalFlow = kHasOpticalFlow,
                                         .modelAsNamed = ModelAsNamed(d),
+                                        .captureFolder = interior::DefaultCaptureFolder(b.executableDirectory),
                                         .window = FollowedWindow(b) };
         };
 

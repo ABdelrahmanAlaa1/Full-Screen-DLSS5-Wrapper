@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 
 namespace interior {
 namespace {
@@ -104,6 +105,13 @@ CaptureStem NumberedStem(const CaptureStem& stem, std::uint32_t attempt) noexcep
     if (attempt <= 1)
         return stem;
     return CaptureStem::Parse(infra::Formatted<CaptureStem::Capacity>("{}_{}", stem.Get(), attempt).Get()).value_or(stem);
+}
+
+DirectoryPath DefaultCaptureFolder(const DirectoryPath& executableDirectory) noexcept
+{
+    std::array<wchar_t, DirectoryPath::Capacity + 1> path{}; // WAIVER(R2): a local buffer filled once, before use.
+    const std::format_to_n_result<wchar_t*> written = std::format_to_n(path.data(), static_cast<std::ptrdiff_t>(DirectoryPath::Capacity), L"{}\\Captures", executableDirectory.Get());
+    return DirectoryPath::Parse(std::wstring_view(path.data(), infra::ClampedLength(written.size, DirectoryPath::Capacity))).value_or(DirectoryPath{});
 }
 
 } // namespace interior

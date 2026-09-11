@@ -17,7 +17,7 @@ using UniqueFont = std::unique_ptr<std::remove_pointer_t<HFONT>, FontDeleter>;
 // The panel's pages: the model's own tuning, what is captured and where it is shown, the choices worth
 // having but rarely worth changing, and what the program is and where its source is. Inert holds what
 // changes nothing on a desktop; --show-inert asks for it, so it comes last.
-enum class Page : std::size_t { Model, View, Advanced, About, Inert, Count };
+enum class Page : std::size_t { Model, View, Advanced, Capture, About, Inert, Count };
 
 // A number the operator sets: a slider to sweep it, a box to type it, arrows to step it.
 enum class Field : std::size_t { Intensity, LocalStructure, LocalTone, Skin, MvScaleX, MvScaleY, Split, DepthValue, ResetThreshold, MvLevel, SrPreset, Passes, Count };
@@ -36,6 +36,7 @@ enum class Toggle : std::size_t {
     DebugLayer,
     Indicator,
     CubinCache,
+    AllParameters, // every parameter goes into a capture's name, the ones at their defaults included
     Count
 };
 
@@ -57,12 +58,21 @@ enum class Frame : std::size_t { Tone, Skin, Compare, Count };
 // A line or a few of text on the About page, one of them with a link to the repository in it.
 enum class Note : std::size_t { Title, Purpose, Repository, Count };
 
+// A folder the operator names, typed into a box or browsed for.
+enum class Folder : std::size_t { Captures, Count };
+
+// A push button that asks for one thing to be done: a screenshot, from the Capture page and again from the
+// Model page, so it is to hand while the model is being tuned.
+enum class Action : std::size_t { Screenshot, ModelScreenshot, Count };
+
 constexpr std::size_t kFieldCount = static_cast<std::size_t>(Field::Count);
 constexpr std::size_t kToggleCount = static_cast<std::size_t>(Toggle::Count);
 constexpr std::size_t kGroupCount = static_cast<std::size_t>(Group::Count);
 constexpr std::size_t kPickCount = static_cast<std::size_t>(Pick::Count);
 constexpr std::size_t kFrameCount = static_cast<std::size_t>(Frame::Count);
 constexpr std::size_t kNoteCount = static_cast<std::size_t>(Note::Count);
+constexpr std::size_t kFolderCount = static_cast<std::size_t>(Folder::Count);
+constexpr std::size_t kActionCount = static_cast<std::size_t>(Action::Count);
 constexpr std::size_t kListCount = static_cast<std::size_t>(List::Count);
 constexpr std::size_t kMaxListChoices = 20;
 constexpr std::size_t kMaxChoices = 4;
@@ -87,6 +97,7 @@ struct PanelFindings
     bool superResolution;                          // whether the driver offers it at all; without it the choice is shown but greyed
     bool opticalFlow;                              // whether this build carries the NVIDIA Optical Flow backend; without it that choice is shown but greyed
     bool modelAsNamed;                             // whether nvngx_dlssnr.dll calls its product what the model is called; without that it runs, under a warning
+    interior::DirectoryPath captureFolder;         // where captures go until the operator names another folder
     std::optional<interior::MonitorHandle> window; // the window this session is working on, when it is working on one
 };
 
@@ -121,6 +132,10 @@ struct ControlPanel
     std::array<std::size_t, kListCount> listCounts;
     std::array<HWND, kFrameCount> frames; // each lies under the rows it surrounds, drawn last so it clips none of them
     std::array<HWND, kNoteCount> notes;   // the About page's text; a link in it is opened by the panel's own window procedure
+    std::array<HWND, kFolderCount> folderLabels;
+    std::array<HWND, kFolderCount> folderBoxes;
+    std::array<HWND, kFolderCount> folderBrowsers; // each holds the box beside it, which the folder it browses for goes into
+    std::array<HWND, kActionCount> actions;        // each holds whether it was clicked since the panel was last read
     // Two settings the panel carries but does not show: off, each spoils the picture rather than changing
     // it, so they are the command line's to set and the panel's to pass on unaltered.
     bool displayAffinity;
@@ -135,13 +150,23 @@ struct ControlPanel
     int tallHeight;
 };
 
-// What the panel says this frame: the settings that take effect at once, and the view they belong to.
+// What the operator asked of the capture this frame, and with what.
+struct CaptureRequest
+{
+    bool screenshot; // a screenshot button was clicked since the panel was last read
+    interior::DirectoryPath folder;
+    bool everything; // every parameter goes into the name
+};
+
+// What the panel says this frame: the settings that take effect at once, the view they belong to, and what
+// the capture was asked for.
 struct PanelReading
 {
     interior::LiveSettings live;
     interior::SurfaceSettings surface;
     interior::DisplayMode display;
     interior::Fraction split;
+    CaptureRequest capture;
 };
 
 [[nodiscard]] infra::Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options, const interior::LiveSettings& live, interior::DisplayMode display,

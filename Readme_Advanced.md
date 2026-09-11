@@ -57,6 +57,22 @@ than leaving the overlay sitting over where it used to be. The crosshair goes ba
 the next session takes the monitor the Source setting names, which is the primary one unless it says
 otherwise. Restoring the window does not take it back: drag the crosshair onto it again.
 
+## Screenshots
+
+The panel's **Capture** page writes screenshots: the picture the model was given and the picture shown
+for it, taken from the same frame, as two PNG files. **Save screenshot** is on that page and again on the
+Model page. The files go to a `Captures` folder next to the executable until the box on the Capture page
+names another folder, typed or browsed for; the folder is made when the first screenshot is taken.
+
+Each file is named for what was captured (`Desktop`, or the followed window's title reduced to its letters
+and digits), the settings that shaped the picture, and the minute, as in
+`Desktop_struc-1.00_tone-1.00_standard_9-11--13-42_original.png` and the matching `_processed.png`.
+`_skinstruc-N` is added when the mask is on and skin has a value of its own, `_nomask` when the mask is
+off, `_Intensity-N` when the intensity is under 100%, and `_Nx` when the model runs more than once a frame.
+**Always add all parameter values** adds `_automask`, the intensity and the passes whatever they are. A
+name already taken gets `_2`, `_3` and so on, the same count on both files. The frame loop stands still
+while the two files are written, so the picture pauses for as long as that takes.
+
 ## The model files
 
 `nvngx_dlssnr.dll` (neural rendering, feature 18) is NVIDIA's, is not in this repository, and is not in the

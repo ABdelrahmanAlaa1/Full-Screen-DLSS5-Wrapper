@@ -7,6 +7,7 @@
 
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 
 #include <algorithm>
 #include <array>
@@ -32,6 +33,7 @@ constexpr int kReferenceDpi = 96;
 // so a shorter buffer had the picked window's name rewritten, and repainted, every frame.
 constexpr int kTextCapacity = static_cast<int>(interior::WindowTitle::Capacity) + 1;
 constexpr int kPathCapacity = 260;
+static_assert(kPathCapacity == static_cast<int>(interior::DirectoryPath::Capacity));
 constexpr float kDefaultSplit = 0.5f;
 constexpr auto kCentre = interior::FractionTag::Parse(kDefaultSplit);
 static_assert(kCentre.has_value());
@@ -47,6 +49,12 @@ constexpr int kBoxOffset = 214;
 constexpr int kBoxWidth = 78;
 constexpr int kResetOffset = 312;
 constexpr int kResetWidth = 28;
+constexpr int kBrowseWidth = 80;
+constexpr int kBrowseLeft = kResetOffset + kResetWidth - kBrowseWidth; // the button ends where a reset does
+constexpr int kActionWidth = 160;
+// The panel's push buttons are told apart by the ids they are made with, which come back with their clicks.
+constexpr UINT_PTR kBrowseCommand = 1;
+constexpr UINT_PTR kActionCommand = 2;
 constexpr int kChoiceWidth = 122;
 constexpr int kTabHeight = 30;
 constexpr int kTipWidth = 360; // a hint wraps at this rather than running on in one line
@@ -163,6 +171,8 @@ constexpr std::array<ToggleSpec, kToggleCount> kToggles{ {
     { L"Model indicator", L"Let the model draw its own overlay naming its version, the preset it resolved and its working size. Read as the model loads, so it may need the program restarted.", true,
       nullptr },
     { L"Model kernel cache", L"Let the model cache its compiled kernels. Off makes it rebuild them every run. Read as the model loads, so it may need the program restarted.", true, nullptr },
+    { L"Always add all parameter values",
+      L"Put every parameter into a capture's name, the ones at their defaults included: the mask when it is on, the intensity when it is full, and the passes when there is one.", false, nullptr },
 } };
 
 // Whether a switch's warning applies. The only switch that carries one is the model's, and what it warns of
@@ -250,11 +260,35 @@ constexpr std::array<NoteSpec, kNoteCount> kNotes{ {
     { L"Source code, releases and issues: <a href=\"https://github.com/ThioJoe/DLSS5-Entire-Screen\">github.com/ThioJoe/DLSS5-Entire-Screen</a>", 2 },
 } };
 
+struct FolderSpec
+{
+    const wchar_t* label;
+    const wchar_t* hint;
+};
+
+constexpr std::array<FolderSpec, kFolderCount> kFolders{ {
+    { L"Save captures to", L"The folder screenshots are written to, made when the first is taken if it is not there yet.\nBrowse picks one; the box takes one typed." },
+} };
+
+struct ActionSpec
+{
+    const wchar_t* label;
+    const wchar_t* hint;
+};
+
+constexpr wchar_t kScreenshotHint[] = L"Writes two PNG files from the same frame: the picture the model was given, and the picture shown for it.\n"
+                                      L"Named for the source, the settings and the minute; a name already taken gets a count.";
+
+constexpr std::array<ActionSpec, kActionCount> kActions{ {
+    { L"Save screenshot", kScreenshotHint },
+    { L"Save screenshot", kScreenshotHint },
+} };
+
 // --- what sits on which page, and in what order -------------------------------------------------------
 
 // A frame is a group box around the rows it names. A break ends a column early, so a page can say which
 // rows stand on the right rather than leaving that to how many happen to fit on the left. A note is text.
-enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break, Note };
+enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break, Note, Folder, Action };
 
 struct RowSpec
 {
@@ -289,6 +323,14 @@ struct RowSpec
 [[nodiscard]] constexpr RowSpec Of(Note n) noexcept
 {
     return RowSpec{ Kind::Note, static_cast<std::size_t>(n) };
+}
+[[nodiscard]] constexpr RowSpec Of(Folder f) noexcept
+{
+    return RowSpec{ Kind::Folder, static_cast<std::size_t>(f) };
+}
+[[nodiscard]] constexpr RowSpec Of(Action a) noexcept
+{
+    return RowSpec{ Kind::Action, static_cast<std::size_t>(a) };
 }
 
 constexpr RowSpec kNextColumn{ Kind::Break, 0 };
@@ -328,14 +370,15 @@ struct PageSpec
 // drives a backend this build leaves out.
 constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
     { L"Model",
-      10,
+      11,
       { Of(Toggle::NeuralRendering), Of(List::Preset), Of(Field::Intensity), Of(Field::LocalStructure), Of(Frame::Tone), Of(Frame::Skin), kNextColumn, Of(Field::Passes), Of(Frame::Compare),
-        Of(Pick::Window) } },
+        Of(Pick::Window), Of(Action::ModelScreenshot) } },
     { L"View", 8, { Of(List::Source), Of(Group::Cursor), Of(Toggle::CaptureBorder), kNextColumn, Of(List::Target), Of(Toggle::Vsync), Of(Toggle::Topmost), Of(Group::LogLevel) } },
     { L"Advanced",
       14,
       { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), kNextColumn,
         Of(List::Adapter), Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
+    { L"Capture", 3, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Action::Screenshot) } },
     { L"About", 3, { Of(Note::Title), Of(Note::Purpose), Of(Note::Repository) } },
     { L"Inert", 6, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), kNextColumn, Of(Group::NvofGrid), Of(Group::NvofPerf) } },
 } };
@@ -393,6 +436,8 @@ static_assert(RowsOfKind(Kind::Pick) == kPickCount);
 static_assert(RowsOfKind(Kind::List) == kListCount);
 static_assert(RowsOfKind(Kind::Frame) == kFrameCount);
 static_assert(RowsOfKind(Kind::Note) == kNoteCount);
+static_assert(RowsOfKind(Kind::Folder) == kFolderCount);
+static_assert(RowsOfKind(Kind::Action) == kActionCount);
 static_assert(FramesAreFlat());
 static_assert(PagesBreakOnce());
 
@@ -454,6 +499,8 @@ struct Placement
             return HeightOfList(row.index, m);
         if (row.kind == Kind::Note)
             return m.NoteHeight(kNotes[row.index].lines) + m.RowGap();
+        if (row.kind == Kind::Action)
+            return m.ControlHeight() + m.RowGap();
         return m.RowHeight();
     };
 
@@ -509,11 +556,13 @@ struct Walk
     std::optional<Placement> found;
 };
 
-// A switch has no label of its own above it, and a note is only text, so each stands where a label would.
+// A switch and a button have no label of their own above them, and a note is only text, so each stands
+// where a label would.
 [[nodiscard]] Placement PlaceOf(const RowSpec& row, const Cell& at, const Metrics& m) noexcept
 {
+    static constexpr auto StandsWithoutLabel = [] [[nodiscard]] (Kind kind) noexcept -> bool { return kind == Kind::Toggle || kind == Kind::Note || kind == Kind::Action; };
     const int top = m.PageTop() + at.offset;
-    const int control = row.kind == Kind::Toggle || row.kind == Kind::Note ? top : top + m.LabelHeight();
+    const int control = StandsWithoutLabel(row.kind) ? top : top + m.LabelHeight();
     return Placement{ kMargin + static_cast<int>(at.column) * (kColumnWidth + kMargin), top, control, kColumnWidth };
 }
 
@@ -561,6 +610,9 @@ struct Walk
 
 [[nodiscard]] std::optional<int> TypedSteps(HWND box, const FieldSpec& spec) noexcept;
 void WriteBox(HWND box, int steps, const FieldSpec& spec) noexcept;
+void WriteText(HWND control, const wchar_t* wanted) noexcept;
+[[nodiscard]] std::array<wchar_t, kPathCapacity + 1> PathTextOf(HWND control) noexcept;
+[[nodiscard]] std::optional<interior::DirectoryPath> PickedFolder(HWND owner, const wchar_t* current) noexcept;
 
 // WAIVER(R17): the window procedure is called by the OS, which discards nothing and ignores attributes.
 LRESULT CALLBACK PanelProc(HWND window, UINT message, WPARAM w, LPARAM l) noexcept
@@ -665,9 +717,34 @@ LRESULT CALLBACK PanelProc(HWND window, UINT message, WPARAM w, LPARAM l) noexce
                         return Notified(l);
                     return ::DefWindowProcW(window, message, w, l);
                 };
+
+                // A click on one of the panel's own push buttons. A screenshot is latched in its button, for the next
+                // reading to take and clear; browsing puts the folder picked into the box the button was made with.
+                static constexpr auto CommandedOrDefault = [] [[nodiscard]] (HWND window, UINT message, WPARAM w, LPARAM l) noexcept -> LRESULT {
+                    static constexpr auto Commanded = [] [[nodiscard]] (HWND window, WPARAM w, LPARAM l) noexcept -> LRESULT {
+                        static constexpr auto Latch = [](HWND button) noexcept -> void { (void)::SetWindowLongPtrW(button, GWLP_USERDATA, 1); };
+
+                        static constexpr auto Browse = [](HWND owner, HWND button) noexcept -> void {
+                            HWND box = reinterpret_cast<HWND>(::GetWindowLongPtrW(button, GWLP_USERDATA));
+                            const std::optional<interior::DirectoryPath> picked = PickedFolder(owner, PathTextOf(box).data());
+                            if (picked.has_value())
+                                WriteText(box, picked->CString());
+                        };
+                        if (HIWORD(w) != BN_CLICKED)
+                            return 0;
+                        if (LOWORD(w) == kActionCommand)
+                            Latch(reinterpret_cast<HWND>(l));
+                        if (LOWORD(w) == kBrowseCommand)
+                            Browse(window, reinterpret_cast<HWND>(l));
+                        return 0;
+                    };
+                    if (message == WM_COMMAND)
+                        return Commanded(window, w, l);
+                    return NotifiedOrDefault(window, message, w, l);
+                };
                 if (message == WM_LBUTTONUP)
                     return Released();
-                return NotifiedOrDefault(window, message, w, l);
+                return CommandedOrDefault(window, message, w, l);
             };
             if (message == WM_MOUSEMOVE)
                 return DraggedTo(window);
@@ -700,6 +777,61 @@ constexpr wchar_t kReleaseHint[] = L"Let the window go and capture a monitor aga
     std::array<wchar_t, kTextCapacity> text{}; // WAIVER(R2): a local buffer filled once, before use.
     (void)::GetWindowTextW(control, text.data(), kTextCapacity);
     return text;
+}
+
+// A folder's box holds a path, which is longer than any other text a control shows.
+std::array<wchar_t, kPathCapacity + 1> PathTextOf(HWND control) noexcept
+{
+    std::array<wchar_t, kPathCapacity + 1> text{}; // WAIVER(R2): a local buffer filled once, before use.
+    (void)::GetWindowTextW(control, text.data(), kPathCapacity + 1);
+    return text;
+}
+
+// The system's folder picker, opened on the folder the box names when that is one. It runs on the panel's
+// thread, so the picture stands still while it is open. When the picker cannot be made at all the button
+// does nothing, and the box still takes a folder typed.
+std::optional<interior::DirectoryPath> PickedFolder(HWND owner, const wchar_t* current) noexcept
+{
+    static constexpr auto DialogOf = [] [[nodiscard]] () noexcept -> Com<IFileDialog> {
+        Com<IFileDialog> dialog; // WAIVER(R2): the answer of one call, read once after it.
+        if (FAILED(::CoCreateInstance(__uuidof(FileOpenDialog), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+            return nullptr;
+        return dialog;
+    };
+
+    static constexpr auto StartedAt = [](const Com<IFileDialog>& dialog, const wchar_t* current) noexcept -> void {
+        Com<IShellItem> start; // WAIVER(R2): the answer of one call, read once after it.
+        if (SUCCEEDED(::SHCreateItemFromParsingName(current, nullptr, IID_PPV_ARGS(&start))))
+            (void)dialog->SetFolder(start.Get());
+    };
+
+    static constexpr auto Chosen = [] [[nodiscard]] (const Com<IFileDialog>& dialog, HWND owner) noexcept -> Com<IShellItem> {
+        FILEOPENDIALOGOPTIONS options = 0; // WAIVER(R2): the answer of one call, read once after it.
+        (void)dialog->GetOptions(&options);
+        (void)dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        if (FAILED(dialog->Show(owner)))
+            return nullptr;
+        Com<IShellItem> item; // WAIVER(R2): the answer of one call, read once after it.
+        (void)dialog->GetResult(&item);
+        return item;
+    };
+
+    static constexpr auto PathOf = [] [[nodiscard]] (const Com<IShellItem>& item) noexcept -> std::optional<interior::DirectoryPath> {
+        static constexpr auto ParsedThenFreed = [] [[nodiscard]] (wchar_t * name) noexcept -> std::optional<interior::DirectoryPath> {
+            const std::optional<interior::DirectoryPath> path = infra::AsOptional(interior::DirectoryPath::Parse(name));
+            ::CoTaskMemFree(name);
+            return path;
+        };
+        wchar_t* name = nullptr; // WAIVER(R2): the answer of one call, read once after it.
+        if (item == nullptr || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &name)))
+            return std::nullopt;
+        return ParsedThenFreed(name);
+    };
+    const Com<IFileDialog> dialog = DialogOf();
+    if (dialog == nullptr)
+        return std::nullopt;
+    StartedAt(dialog, current);
+    return PathOf(Chosen(dialog, owner));
 }
 
 [[nodiscard]] std::optional<int> TypedSteps(HWND box, const FieldSpec& spec) noexcept
@@ -900,7 +1032,8 @@ static_assert(kCompareChoices.size() == kGroups[static_cast<std::size_t>(Group::
              o.redirectionBitmap,
              o.debugLayer,
              o.indicator,
-             o.cubinCache };
+             o.cubinCache,
+             false };
 }
 
 // --- building the controls -----------------------------------------------------------------------------
@@ -936,6 +1069,10 @@ struct Built
     std::array<std::array<HWND, kMaxListChoices>, kListCount> listChoices;
     std::array<HWND, kFrameCount> frames;
     std::array<HWND, kNoteCount> notes;
+    std::array<HWND, kFolderCount> folderLabels;
+    std::array<HWND, kFolderCount> folderBoxes;
+    std::array<HWND, kFolderCount> folderBrowsers;
+    std::array<HWND, kActionCount> actions;
 };
 
 [[nodiscard]] LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) noexcept;
@@ -1126,6 +1263,11 @@ LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) no
     return { panel.labels[f], panel.sliders[f], panel.boxes[f], panel.spins[f], panel.resets[f], panel.warnings[f] };
 }
 
+[[nodiscard]] std::array<HWND, 3> ControlsOfFolder(const ControlPanel& panel, std::size_t f) noexcept
+{
+    return { panel.folderLabels[f], panel.folderBoxes[f], panel.folderBrowsers[f] };
+}
+
 [[nodiscard]] int HowOf(bool visible) noexcept
 {
     return visible ? SW_SHOW : SW_HIDE;
@@ -1137,11 +1279,11 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
     static constexpr auto ShowPage = [](const ControlPanel& panel, Page page, bool visible) noexcept -> void {
         // A frame is shown with the rows inside it; a break has nothing to show.
         static constexpr auto ShowRowOrFrame = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
-            static constexpr auto ShowRow = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
-                static constexpr auto ShowAll = [](std::span<const HWND> controls, int how) noexcept -> void {
-                    std::ranges::for_each(controls, [how](HWND control) { (void)::ShowWindow(control, how); });
-                };
+            static constexpr auto ShowAll = [](std::span<const HWND> controls, int how) noexcept -> void {
+                std::ranges::for_each(controls, [how](HWND control) { (void)::ShowWindow(control, how); });
+            };
 
+            static constexpr auto ShowRow = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
                 static constexpr auto ShowNumberOrSwitch = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
                     static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 3> {
                         return { panel.toggles[t], panel.toggleResets[t], panel.toggleWarnings[t] };
@@ -1196,6 +1338,10 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
                 return;
             if (row.kind == Kind::Note)
                 (void)::ShowWindow(panel.notes[row.index], HowOf(visible));
+            else if (row.kind == Kind::Action)
+                (void)::ShowWindow(panel.actions[row.index], HowOf(visible));
+            else if (row.kind == Kind::Folder)
+                ShowAll(ControlsOfFolder(panel, row.index), HowOf(visible));
             else if (row.kind == Kind::Frame)
                 ShowFrame(panel, row.index, visible);
             else
@@ -1620,6 +1766,13 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                          ::GetModuleHandleW(nullptr), nullptr);
             };
 
+            // A push button whose click the panel's window procedure answers: the id comes back with the click and
+            // says which kind of button it was.
+            static constexpr auto CreateCommanded = [] [[nodiscard]] (HWND parent, const wchar_t* text, RECT bounds, UINT_PTR id) noexcept -> HWND {
+                return ::CreateWindowExW(0, WC_BUTTONW, text, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_PUSHBUTTON, bounds.left, bounds.top, bounds.right, bounds.bottom, parent,
+                                         reinterpret_cast<HMENU>(id), ::GetModuleHandleW(nullptr), nullptr);
+            };
+
             // Horizontal places are given in reference pixels and scaled; vertical ones are already in the display's
             // dots, because they follow the text.
             static constexpr auto Bounds = [] [[nodiscard]] (const Metrics& m, int x, int top, int width, int height) noexcept -> RECT { return RECT{ m.Of(x), top, m.Of(width), height }; };
@@ -1914,9 +2067,47 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     built.notes = infra::Generated<HWND, kNoteCount>([&](std::size_t n) { return CreateNote(parent, m, n); });
                     return built;
                 };
+
+                // A folder row is a label, a box for the path and a Browse button that holds the box, so the folder it
+                // picks has somewhere to go.
+                static constexpr auto BuildFolders = [] [[nodiscard]] (HWND parent, const Metrics& m, const PanelFindings& findings, Built built) noexcept -> Built {
+                    static constexpr auto CreateFolderBox = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t f, const interior::DirectoryPath& folder) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Folder, f, m);
+                        const HWND box = CreateChild(parent, WC_EDITW, folder.CString(), ES_LEFT | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE,
+                                                     Bounds(m, at.left, at.control, kBrowseLeft - kMargin, m.ControlHeight()));
+                        if (box != nullptr)
+                            (void)::SendMessageW(box, EM_SETLIMITTEXT, kPathCapacity, 0);
+                        return box;
+                    };
+
+                    static constexpr auto CreateBrowser = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t f, HWND box) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Folder, f, m);
+                        const HWND browser = CreateCommanded(parent, L"Browse...", Bounds(m, at.left + kBrowseLeft, at.control, kBrowseWidth, m.ControlHeight()), kBrowseCommand);
+                        if (browser != nullptr)
+                            (void)::SetWindowLongPtrW(browser, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(box));
+                        return browser;
+                    };
+                    built.folderLabels = infra::Generated<HWND, kFolderCount>([&](std::size_t f) {
+                        const Placement at = PlaceOfRow(Kind::Folder, f, m);
+                        return CreateLabel(parent, m, kFolders[f].label, at.left, at.top, at.width);
+                    });
+                    built.folderBoxes = infra::Generated<HWND, kFolderCount>([&](std::size_t f) { return CreateFolderBox(parent, m, f, findings.captureFolder); });
+                    built.folderBrowsers = infra::Generated<HWND, kFolderCount>([&](std::size_t f) { return CreateBrowser(parent, m, f, built.folderBoxes[f]); });
+                    return built;
+                };
+
+                static constexpr auto BuildActions = [] [[nodiscard]] (HWND parent, const Metrics& m, Built built) noexcept -> Built {
+                    static constexpr auto CreateAction = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t a) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Action, a, m);
+                        return CreateCommanded(parent, kActions[a].label, Bounds(m, at.left, at.control, kActionWidth, m.ControlHeight()), kActionCommand);
+                    };
+                    built.actions = infra::Generated<HWND, kActionCount>([&](std::size_t a) { return CreateAction(parent, m, a); });
+                    return built;
+                };
                 const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), findings, BuildFields(parent, m, StartingValues(o, live), Built{}));
                 const Built rows = BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), findings, numbers)));
-                return BuildNotes(parent, m, BuildFrames(parent, m, rows));
+                const Built pages = BuildActions(parent, m, BuildFolders(parent, m, findings, BuildNotes(parent, m, rows)));
+                return BuildFrames(parent, m, pages);
             };
 
             static constexpr auto CreateTabs = [] [[nodiscard]] (HWND parent, const Metrics& m) noexcept -> HWND {
@@ -1978,6 +2169,10 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  CountsOf(*m.lists),
                                  built.frames,
                                  built.notes,
+                                 built.folderLabels,
+                                 built.folderBoxes,
+                                 built.folderBrowsers,
+                                 built.actions,
                                  o.displayAffinity,
                                  o.clickThrough,
                                  findings.superResolution,
@@ -2000,9 +2195,9 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
 
                     static constexpr auto EveryRowPresent = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> bool {
                         // Every span here points into the panel itself, which outlives the answer.
-                        static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 13> {
-                            return { panel.labels,     panel.sliders,    panel.boxes,     panel.spins,      panel.resets, panel.toggles, panel.groupLabels,
-                                     panel.pickLabels, panel.crosshairs, panel.pickNames, panel.pickResets, panel.frames, panel.notes };
+                        static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 17> {
+                            return { panel.labels,    panel.sliders,    panel.boxes,  panel.spins, panel.resets,       panel.toggles,     panel.groupLabels,    panel.pickLabels, panel.crosshairs,
+                                     panel.pickNames, panel.pickResets, panel.frames, panel.notes, panel.folderLabels, panel.folderBoxes, panel.folderBrowsers, panel.actions };
                         };
                         return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs);
                     };
@@ -2067,6 +2262,12 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                               [&panel, parent](std::size_t g) { AddHint(panel.tooltip, parent, panel.groupLabels[g], kGroups[g].hint); });
                         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kPickCount), [&panel, parent](std::size_t t) { AddHint(panel.tooltip, parent, panel.crosshairs[t], kPicks[t].hint); });
                         std::ranges::for_each(panel.pickResets, [&panel, parent](HWND button) { AddHint(panel.tooltip, parent, button, kReleaseHint); });
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kFolderCount),
+                                              [&panel, parent](std::size_t f) { AddHint(panel.tooltip, parent, panel.folderBoxes[f], kFolders[f].hint); });
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kFolderCount),
+                                              [&panel, parent](std::size_t f) { AddHint(panel.tooltip, parent, panel.folderBrowsers[f], kFolders[f].hint); });
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kActionCount),
+                                              [&panel, parent](std::size_t a) { AddHint(panel.tooltip, parent, panel.actions[a], kActions[a].hint); });
                     };
 
                     // A greyed control that says nothing is just a control that does not work, so the reason replaces the hint.
@@ -2179,6 +2380,10 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
                             return panel.frames[row.index];
                         if (row.kind == Kind::Note)
                             return panel.notes[row.index];
+                        if (row.kind == Kind::Folder)
+                            return panel.folderLabels[row.index];
+                        if (row.kind == Kind::Action)
+                            return panel.actions[row.index];
                         return MarkerOfRow(panel, row);
                     };
 
@@ -2301,9 +2506,27 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
         ApplyEnables(panel);
         Readback(panel);
     };
+
+    // A screenshot button keeps its click until the panel is read, and every button is read, so a click on
+    // either is taken and none is left waiting for the next reading.
+    static constexpr auto CaptureOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> CaptureRequest {
+        static constexpr auto Taken = [] [[nodiscard]] (HWND button) noexcept -> bool {
+            const bool clicked = ::GetWindowLongPtrW(button, GWLP_USERDATA) != 0;
+            if (clicked)
+                (void)::SetWindowLongPtrW(button, GWLP_USERDATA, 0);
+            return clicked;
+        };
+
+        static constexpr auto FolderOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> interior::DirectoryPath {
+            const std::array<wchar_t, kPathCapacity + 1> text = PathTextOf(panel.folderBoxes[static_cast<std::size_t>(Folder::Captures)]);
+            return interior::DirectoryPath::Parse(text.data()).value_or(interior::DirectoryPath{});
+        };
+        const bool screenshot = std::ranges::count_if(panel.actions, Taken) > 0;
+        return CaptureRequest{ screenshot, FolderOf(panel), IsOn(panel, Toggle::AllParameters) };
+    };
     Arrange(panel);
     const interior::Fraction split = interior::FractionTag::Parse(SettledValue(panel, Field::Split)).value_or(*kCentre);
-    return PanelReading{ LiveOf(panel, current), SurfaceOf(panel), DisplayFrom(ChosenIn(panel, Group::Compare, 0)), split };
+    return PanelReading{ LiveOf(panel, current), SurfaceOf(panel), DisplayFrom(ChosenIn(panel, Group::Compare, 0)), split, CaptureOf(panel) };
 }
 
 // The window a session was following has gone: the panel lets go of it too, so what it shows is the source
