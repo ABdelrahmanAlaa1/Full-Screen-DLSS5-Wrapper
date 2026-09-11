@@ -2,13 +2,22 @@
 
 ### A demo app that applies DLSS5 to the entire screen (even the desktop) with full model controls.
 
+See example screenshots below.
+
 > [!NOTE]
 > This is an UNOFFICIAL project, not associated with Nvidia.
 
-## Screenshot
+## App Screenshot
 <p align="center">
 <img width="750" src="https://github.com/user-attachments/assets/0db29600-2e94-4714-9c36-5dbe2a446619" />
 </p>
+
+## Key Features:
+- It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
+- Does NOT inject itself into any applications. It reads the final screen output and processes that.
+  - Therefore it won't trigger a false positive for any anti-cheats any more than a normal screen recorder would.
+- Full control over internal model inputs. Including uncapped values for structure and tone.
+- Ability to selectively apply it to a specific window.
 
 ## Examples
 
@@ -41,3 +50,15 @@
 <p align="center">
 <img width="2554" height="1585" alt="Oblivion 20x" src="https://github.com/user-attachments/assets/9f2422c9-cc0c-4bff-81cc-02a0c210882b" />
 </p>
+
+## Requirements
+
+- You need Nvidia drivers `616.64` or newer.
+- You must acquire `nvngx_dlssnr.dll` yourself and put it next to the app `exe`.
+  - Just Google it, you can find people who have uploaded it like on reddit.
+  - For copyright reasons I will not host or link to it from here.
+  - Note: The app will verify the dll's signature to ensure it's the right file either way.
+- Tested on a 50 series GPU. Not sure if it works on other generations.
+
+## Optional:
+- `nvngx_dlss.dll` - Enables use of super resolution options. Also put that next to the `exe`.
