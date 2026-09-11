@@ -2,6 +2,7 @@
 #include "effects/real/com.h"
 #include "infrastructure/bounded_vector.h"
 #include "interior/options.h"
+#include "interior/sweep.h"
 
 #include <array>
 #include <optional>
@@ -53,18 +54,23 @@ enum class List : std::size_t { Preset, Source, Target, Adapter, Count };
 enum class Pick : std::size_t { Window, Count };
 
 // A group box drawn around rows that belong together, captioned with what they have in common: the tone
-// controls, since style changes nothing while local tone is zero; the skin controls; and the comparison.
-enum class Frame : std::size_t { Tone, Skin, Compare, Count };
+// controls, since style changes nothing while local tone is zero; the skin controls; the comparison view;
+// and the comparison capture, which runs settings through their values.
+enum class Frame : std::size_t { Tone, Skin, Compare, Comparison, Count };
 
-// A line or a few of text on the About page, one of them with a link to the repository in it.
-enum class Note : std::size_t { Title, Purpose, Repository, Count };
+// A line or a few of text: the About page's, one with a link to the repository in it, and what a
+// comparison capture does, at the top of its box.
+enum class Note : std::size_t { Title, Purpose, Repository, Comparison, Count };
+
+// A bar that fills as a comparison capture goes along.
+enum class Progress : std::size_t { Comparison, Count };
 
 // A folder the operator names, typed into a box or browsed for.
 enum class Folder : std::size_t { Captures, Count };
 
 // A push button that asks for one thing to be done: a screenshot, from the Capture page and again from the
-// Model page, so it is to hand while the model is being tuned.
-enum class Action : std::size_t { Screenshot, ModelScreenshot, Record, Count };
+// Model page, so it is to hand while the model is being tuned; a recording; a comparison capture.
+enum class Action : std::size_t { Screenshot, ModelScreenshot, Record, Compare, Count };
 
 constexpr std::size_t kFieldCount = static_cast<std::size_t>(Field::Count);
 constexpr std::size_t kToggleCount = static_cast<std::size_t>(Toggle::Count);
@@ -74,6 +80,8 @@ constexpr std::size_t kFrameCount = static_cast<std::size_t>(Frame::Count);
 constexpr std::size_t kNoteCount = static_cast<std::size_t>(Note::Count);
 constexpr std::size_t kFolderCount = static_cast<std::size_t>(Folder::Count);
 constexpr std::size_t kActionCount = static_cast<std::size_t>(Action::Count);
+constexpr std::size_t kSweepCount = interior::kSweepParameterCount;
+constexpr std::size_t kProgressCount = static_cast<std::size_t>(Progress::Count);
 constexpr std::size_t kListCount = static_cast<std::size_t>(List::Count);
 constexpr std::size_t kMaxListChoices = 20;
 constexpr std::size_t kMaxChoices = 4;
@@ -138,6 +146,11 @@ struct ControlPanel
     std::array<HWND, kFolderCount> folderBrowsers; // each holds the box beside it, which the folder it browses for goes into
     std::array<HWND, kActionCount> actions;        // each holds whether it was clicked since the panel was last read
     HWND recordingLabel;                           // how long the recording has run, beside the button that stops it; empty otherwise
+    std::array<HWND, kSweepCount> sweepChecks;     // one per setting a comparison capture can run through
+    std::array<HWND, kSweepCount> sweepBoxes;      // how many values, for a setting that takes a count; nothing for the rest
+    std::array<HWND, kSweepCount> sweepSpins;
+    HWND comparisonLabel; // how many pictures a comparison capture would take, or how far the one under way has got
+    std::array<HWND, kProgressCount> progress;
     // Two settings the panel carries but does not show: off, each spoils the picture rather than changing
     // it, so they are the command line's to set and the panel's to pass on unaltered.
     bool displayAffinity;
@@ -152,6 +165,14 @@ struct ControlPanel
     int tallHeight;
 };
 
+// What a comparison capture is asked to run through, and whether its button was clicked, which starts one or
+// stops the one under way.
+struct ComparisonRequest
+{
+    bool start;
+    interior::SweepSpec axes;
+};
+
 // What the operator asked of the capture this frame, and with what.
 struct CaptureRequest
 {
@@ -160,6 +181,7 @@ struct CaptureRequest
     interior::DirectoryPath folder;
     bool everything; // every parameter goes into the name
     bool cursor;     // the cursor is drawn into the pictures
+    ComparisonRequest comparison;
 };
 
 // What the panel says this frame: the settings that take effect at once, the view they belong to, and what
@@ -201,6 +223,10 @@ void ApplySplit(const ControlPanel& panel, interior::Fraction split) noexcept;
 // Shows whether a recording is under way and for how long: the record button reads as the way to stop it,
 // and the time runs beside it. Nothing means none is.
 void ApplyRecording(const ControlPanel& panel, const std::optional<interior::Microseconds>& elapsed) noexcept;
+
+// Shows how many pictures a comparison capture would take as the boxes stand, or how far the one under way
+// has got: the button reads as the way to stop it, the count runs beside it, and the bar fills.
+void ApplyComparison(const ControlPanel& panel, std::uint32_t planned, const std::optional<interior::SweepProgress>& running) noexcept;
 
 // True once the operator has closed the panel, which ends the session.
 [[nodiscard]] bool IsPanelClosed(const ControlPanel& panel) noexcept;

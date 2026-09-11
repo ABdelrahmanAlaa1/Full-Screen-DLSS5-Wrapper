@@ -79,6 +79,17 @@ was taken, as Windows draws it, and scaled with the picture when the processed o
 original. When the capture carries the cursor already, with the View page's cursor set to On or a source
 the output does not cover, nothing more is drawn.
 
+**Settings comparison capture**, in the box beside those, takes one frame and writes the model's picture of
+it for every combination of the settings checked: a strength or the intensity from nothing up to the value
+its slider has now, in as many values as its box says; the passes from one up to the count; the three
+styles; the mask off and on. The count of pictures that makes is shown before anything is taken, since
+every setting checked multiplies it. **Capture all combinations** writes the original once, then one
+`_processed.png` per combination, every parameter in its name, into a folder of their own under the
+captures folder named for the source and the minute, as in `Desktop_multicapture_9-11--13-42`. No new
+frame is captured while it runs: each combination is run on the frame it started with, and the model is
+built again for each, which is what takes the time. The bar under the button fills as it goes, and
+clicking the button again stops it.
+
 **Record video** on the same page records the two pictures as two MP4 files, `_original.mp4` and
 `_processed.mp4`, named the same way, until it is clicked again; the time recorded so far runs beside it.
 Each frame's two pictures are copied out of the GPU together and given the same time in both files, taken

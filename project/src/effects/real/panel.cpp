@@ -262,6 +262,7 @@ constexpr std::array<NoteSpec, kNoteCount> kNotes{ {
     { L"Full-Screen Wrapper for DLSS5, version " DSCREEN_VERSION_STRING, 1 },
     { L"An experimental tool that runs NVIDIA's DLSS 5 Neural Rendering model on the desktop, or on one window. It is not an NVIDIA product, and the model file is not included with it.", 3 },
     { L"Source code, releases and issues: <a href=\"https://github.com/ThioJoe/DLSS5-Entire-Screen\">github.com/ThioJoe/DLSS5-Entire-Screen</a>", 2 },
+    { L"Runs the checked settings through every combination of their values, all from one frame: a strength from nothing up to where its slider is now, the passes from one up to the count.", 4 },
 } };
 
 struct FolderSpec
@@ -288,18 +289,45 @@ constexpr wchar_t kRecordHint[] = L"Records the picture the model was given and 
 constexpr wchar_t kRecordLabel[] = L"Record video";
 constexpr wchar_t kStopLabel[] = L"Stop recording";
 constexpr int kElapsedWidth = 120;
+constexpr wchar_t kCompareHint[] = L"Takes one frame and writes its original, then the model's picture for every combination of the settings checked above, all from that one frame, into a "
+                                   L"folder of their own under the captures folder.\nThe model is built again for each, so it takes a moment per picture. Clicking again stops it.";
+constexpr wchar_t kCompareLabel[] = L"Capture all combinations";
+constexpr wchar_t kStopCompareLabel[] = L"Stop capturing";
 
 constexpr std::array<ActionSpec, kActionCount> kActions{ {
     { L"Save screenshot", kScreenshotHint },
     { L"Save screenshot", kScreenshotHint },
     { kRecordLabel, kRecordHint },
+    { kCompareLabel, kCompareHint },
+} };
+
+// A setting a comparison capture can run through, and whether it takes a count of values.
+struct SweepRowSpec
+{
+    const wchar_t* label;
+    const wchar_t* hint;
+    bool counted;
+};
+
+constexpr int kValuesWidth = 56;
+constexpr int kDefaultValues = 3;
+constexpr wchar_t kDefaultValuesText[] = L"3";
+
+constexpr std::array<SweepRowSpec, kSweepCount> kSweeps{ {
+    { L"Intensity", L"From 0% up to the intensity set now, in this many values.", true },
+    { L"Local structure", L"From 0 up to the local structure set now, in this many values.", true },
+    { L"Local tone", L"From 0 up to the local tone set now, in this many values.", true },
+    { L"Skin structure", L"From 0 up to the skin structure set now, in this many values; while skin follows local structure, up to that instead.", true },
+    { L"Style (all three)", L"Standard, natural and cinematic.", false },
+    { L"Auto mask (off and on)", L"With the mask off, and with it on.", false },
+    { L"Model passes (1 up to the count)", L"One pass, two passes, and so on up to this many.", true },
 } };
 
 // --- what sits on which page, and in what order -------------------------------------------------------
 
 // A frame is a group box around the rows it names. A break ends a column early, so a page can say which
 // rows stand on the right rather than leaving that to how many happen to fit on the left. A note is text.
-enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break, Note, Folder, Action };
+enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break, Note, Folder, Action, Sweep, Progress };
 
 struct RowSpec
 {
@@ -343,10 +371,18 @@ struct RowSpec
 {
     return RowSpec{ Kind::Action, static_cast<std::size_t>(a) };
 }
+[[nodiscard]] constexpr RowSpec Of(interior::SweepParameter s) noexcept
+{
+    return RowSpec{ Kind::Sweep, static_cast<std::size_t>(s) };
+}
+[[nodiscard]] constexpr RowSpec Of(Progress p) noexcept
+{
+    return RowSpec{ Kind::Progress, static_cast<std::size_t>(p) };
+}
 
 constexpr RowSpec kNextColumn{ Kind::Break, 0 };
 
-constexpr std::size_t kMaxFrameRows = 4;
+constexpr std::size_t kMaxFrameRows = 10;
 
 struct FrameSpec
 {
@@ -356,11 +392,17 @@ struct FrameSpec
 };
 
 // Style changes nothing while local tone is zero, so the two share a frame; the skin controls share one
-// because each of the three decides what the others mean; and the comparison is a view, not a setting.
+// because each of the three decides what the others mean; the comparison is a view, not a setting; and the
+// comparison capture is one thing asked for with several rows.
 constexpr std::array<FrameSpec, kFrameCount> kFrames{ {
     { L"Tone", 2, { Of(Field::LocalTone), Of(Group::Style) } },
     { L"Skin", 3, { Of(Toggle::AutoMask), Of(Toggle::SkinFollowsStructure), Of(Field::Skin) } },
     { L"Compare", 2, { Of(Group::Compare), Of(Field::Split) } },
+    { L"Settings comparison capture",
+      10,
+      { Of(Note::Comparison), Of(interior::SweepParameter::Intensity), Of(interior::SweepParameter::LocalStructure), Of(interior::SweepParameter::LocalTone),
+        Of(interior::SweepParameter::SkinStructure), Of(interior::SweepParameter::Style), Of(interior::SweepParameter::AutoMask), Of(interior::SweepParameter::Passes), Of(Action::Compare),
+        Of(Progress::Comparison) } },
 } };
 
 constexpr std::size_t kMaxRows = kColumns * kMaxRowsPerColumn;
@@ -389,7 +431,7 @@ constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
       14,
       { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), kNextColumn,
         Of(List::Adapter), Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
-    { L"Capture", 5, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Toggle::CaptureCursor), Of(Action::Screenshot), Of(Action::Record) } },
+    { L"Capture", 7, { Of(Folder::Captures), Of(Toggle::AllParameters), Of(Toggle::CaptureCursor), Of(Action::Screenshot), Of(Action::Record), kNextColumn, Of(Frame::Comparison) } },
     { L"About", 3, { Of(Note::Title), Of(Note::Purpose), Of(Note::Repository) } },
     { L"Inert", 6, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), kNextColumn, Of(Group::NvofGrid), Of(Group::NvofPerf) } },
 } };
@@ -449,6 +491,8 @@ static_assert(RowsOfKind(Kind::Frame) == kFrameCount);
 static_assert(RowsOfKind(Kind::Note) == kNoteCount);
 static_assert(RowsOfKind(Kind::Folder) == kFolderCount);
 static_assert(RowsOfKind(Kind::Action) == kActionCount);
+static_assert(RowsOfKind(Kind::Sweep) == kSweepCount);
+static_assert(RowsOfKind(Kind::Progress) == kProgressCount);
 static_assert(FramesAreFlat());
 static_assert(PagesBreakOnce());
 
@@ -510,7 +554,7 @@ struct Placement
             return HeightOfList(row.index, m);
         if (row.kind == Kind::Note)
             return m.NoteHeight(kNotes[row.index].lines) + m.RowGap();
-        if (row.kind == Kind::Action)
+        if (row.kind == Kind::Action || row.kind == Kind::Sweep || row.kind == Kind::Progress)
             return m.ControlHeight() + m.RowGap();
         return m.RowHeight();
     };
@@ -567,11 +611,13 @@ struct Walk
     std::optional<Placement> found;
 };
 
-// A switch and a button have no label of their own above them, and a note is only text, so each stands
-// where a label would.
+// A switch, a button, a comparison row and a bar have no label of their own above them, and a note is only
+// text, so each stands where a label would.
 [[nodiscard]] Placement PlaceOf(const RowSpec& row, const Cell& at, const Metrics& m) noexcept
 {
-    static constexpr auto StandsWithoutLabel = [] [[nodiscard]] (Kind kind) noexcept -> bool { return kind == Kind::Toggle || kind == Kind::Note || kind == Kind::Action; };
+    static constexpr auto StandsWithoutLabel = [] [[nodiscard]] (Kind kind) noexcept -> bool {
+        return kind == Kind::Toggle || kind == Kind::Note || kind == Kind::Action || kind == Kind::Sweep || kind == Kind::Progress;
+    };
     const int top = m.PageTop() + at.offset;
     const int control = StandsWithoutLabel(row.kind) ? top : top + m.LabelHeight();
     return Placement{ kMargin + static_cast<int>(at.column) * (kColumnWidth + kMargin), top, control, kColumnWidth };
@@ -694,7 +740,15 @@ LRESULT CALLBACK PanelProc(HWND window, UINT message, WPARAM w, LPARAM l) noexce
                             NudgeBox(box, kFields[field], delta->iDelta);
                         };
 
+                        // The count boxes of a comparison capture take whole numbers, which their arrows write themselves; they are
+                        // told from a field's arrows by an index past the fields'.
+                        static constexpr auto IsFieldSpin = [] [[nodiscard]] (LPARAM l) noexcept -> bool {
+                            return static_cast<std::size_t>(::GetWindowLongPtrW(reinterpret_cast<const NMUPDOWN*>(l)->hdr.hwndFrom, GWLP_USERDATA)) < kFieldCount;
+                        };
+
                         static constexpr auto Nudged = [] [[nodiscard]] (LPARAM l) noexcept -> LRESULT {
+                            if (!IsFieldSpin(l))
+                                return 0; // the arrows apply the change and write their box
                             Nudge(reinterpret_cast<const NMUPDOWN*>(l));
                             return 1; // the control keeps the position it was given, which nothing reads
                         };
@@ -1085,6 +1139,11 @@ struct Built
     std::array<HWND, kFolderCount> folderBrowsers;
     std::array<HWND, kActionCount> actions;
     HWND recordingLabel;
+    std::array<HWND, kSweepCount> sweepChecks;
+    std::array<HWND, kSweepCount> sweepBoxes;
+    std::array<HWND, kSweepCount> sweepSpins;
+    HWND comparisonLabel;
+    std::array<HWND, kProgressCount> progress;
 };
 
 [[nodiscard]] LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) noexcept;
@@ -1280,10 +1339,24 @@ LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) no
     return { panel.folderLabels[f], panel.folderBoxes[f], panel.folderBrowsers[f] };
 }
 
-// The record button has the time beside it; the others stand alone, and nothing is shown for nothing.
+// The record button has the time beside it and the compare button its count; the others stand alone, and
+// nothing is shown for nothing.
 [[nodiscard]] std::array<HWND, 2> ControlsOfAction(const ControlPanel& panel, std::size_t a) noexcept
 {
-    return { panel.actions[a], a == static_cast<std::size_t>(Action::Record) ? panel.recordingLabel : nullptr };
+    static constexpr auto BesideOf = [] [[nodiscard]] (const ControlPanel& panel, std::size_t a) noexcept -> HWND {
+        if (a == static_cast<std::size_t>(Action::Record))
+            return panel.recordingLabel;
+        if (a == static_cast<std::size_t>(Action::Compare))
+            return panel.comparisonLabel;
+        return nullptr;
+    };
+    return { panel.actions[a], BesideOf(panel, a) };
+}
+
+// A setting's row in a comparison capture: the switch, and the count box with its arrows where it takes one.
+[[nodiscard]] std::array<HWND, 3> ControlsOfSweep(const ControlPanel& panel, std::size_t s) noexcept
+{
+    return { panel.sweepChecks[s], panel.sweepBoxes[s], panel.sweepSpins[s] };
 }
 
 [[nodiscard]] int HowOf(bool visible) noexcept
@@ -1295,75 +1368,65 @@ LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) no
 void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
 {
     static constexpr auto ShowPage = [](const ControlPanel& panel, Page page, bool visible) noexcept -> void {
+        static constexpr auto ShowAll = [](std::span<const HWND> controls, int how) noexcept -> void { std::ranges::for_each(controls, [how](HWND control) { (void)::ShowWindow(control, how); }); };
+
+        // Any row but a frame or a break, on a page or inside a frame: what the row is made of is what is shown.
+        static constexpr auto ShowRow = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
+            static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 3> {
+                return { panel.toggles[t], panel.toggleResets[t], panel.toggleWarnings[t] };
+            };
+
+            static constexpr auto ControlsOfPick = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 4> {
+                return { panel.pickLabels[t], panel.crosshairs[t], panel.pickNames[t], panel.pickResets[t] };
+            };
+
+            static constexpr auto ShowList = [](const ControlPanel& panel, std::size_t list, int how) noexcept -> void {
+                (void)::ShowWindow(panel.listLabels[list], how);
+                ShowAll(ChoicesOfList(panel, static_cast<List>(list)), how);
+            };
+
+            // A group's glyph exists only when its warning applies, so showing nothing is showing it.
+            static constexpr auto ShowGroup = [](const ControlPanel& panel, std::size_t group, int how) noexcept -> void {
+                (void)::ShowWindow(panel.groupLabels[group], how);
+                (void)::ShowWindow(panel.groupWarnings[group], how);
+                ShowAll(ChoicesOf(panel, static_cast<Group>(group)), how);
+            };
+
+            static constexpr auto ShowOne = [](HWND control, int how) noexcept -> void { (void)::ShowWindow(control, how); };
+            if (row.kind == Kind::Field)
+                ShowAll(ControlsOfField(panel, row.index), how);
+            else if (row.kind == Kind::Toggle)
+                ShowAll(ControlsOfToggle(panel, row.index), how);
+            else if (row.kind == Kind::Group)
+                ShowGroup(panel, row.index, how);
+            else if (row.kind == Kind::Pick)
+                ShowAll(ControlsOfPick(panel, row.index), how);
+            else if (row.kind == Kind::List)
+                ShowList(panel, row.index, how);
+            else if (row.kind == Kind::Note)
+                ShowOne(panel.notes[row.index], how);
+            else if (row.kind == Kind::Folder)
+                ShowAll(ControlsOfFolder(panel, row.index), how);
+            else if (row.kind == Kind::Action)
+                ShowAll(ControlsOfAction(panel, row.index), how);
+            else if (row.kind == Kind::Sweep)
+                ShowAll(ControlsOfSweep(panel, row.index), how);
+            else if (row.kind == Kind::Progress)
+                ShowOne(panel.progress[row.index], how);
+        };
+
         // A frame is shown with the rows inside it; a break has nothing to show.
         static constexpr auto ShowRowOrFrame = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
-            static constexpr auto ShowAll = [](std::span<const HWND> controls, int how) noexcept -> void {
-                std::ranges::for_each(controls, [how](HWND control) { (void)::ShowWindow(control, how); });
-            };
-
-            static constexpr auto ShowRow = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
-                static constexpr auto ShowNumberOrSwitch = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                    static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 3> {
-                        return { panel.toggles[t], panel.toggleResets[t], panel.toggleWarnings[t] };
-                    };
-                    if (row.kind == Kind::Field)
-                        ShowAll(ControlsOfField(panel, row.index), how);
-                    else
-                        ShowAll(ControlsOfToggle(panel, row.index), how);
-                };
-
-                // A number and a switch each stand on a row of their own; a group and a box are laid out differently.
-                static constexpr auto StandsAlone = [] [[nodiscard]] (Kind kind) noexcept -> bool { return kind == Kind::Field || kind == Kind::Toggle; };
-
-                static constexpr auto ShowChoicesOrText = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                    static constexpr auto ShowList = [](const ControlPanel& panel, std::size_t list, int how) noexcept -> void {
-                        (void)::ShowWindow(panel.listLabels[list], how);
-                        ShowAll(ChoicesOfList(panel, static_cast<List>(list)), how);
-                    };
-
-                    static constexpr auto ShowGroupOrText = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                        static constexpr auto ControlsOfPick = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 4> {
-                            return { panel.pickLabels[t], panel.crosshairs[t], panel.pickNames[t], panel.pickResets[t] };
-                        };
-
-                        // A group's glyph exists only when its warning applies, so showing nothing is showing it.
-                        static constexpr auto ShowGroup = [](const ControlPanel& panel, std::size_t group, int how) noexcept -> void {
-                            (void)::ShowWindow(panel.groupLabels[group], how);
-                            (void)::ShowWindow(panel.groupWarnings[group], how);
-                            ShowAll(ChoicesOf(panel, static_cast<Group>(group)), how);
-                        };
-                        if (row.kind == Kind::Group)
-                            ShowGroup(panel, row.index, how);
-                        else
-                            ShowAll(ControlsOfPick(panel, row.index), how);
-                    };
-                    if (row.kind == Kind::List)
-                        ShowList(panel, row.index, how);
-                    else
-                        ShowGroupOrText(panel, row, how);
-                };
-                if (StandsAlone(row.kind))
-                    ShowNumberOrSwitch(panel, row, HowOf(visible));
-                else
-                    ShowChoicesOrText(panel, row, HowOf(visible));
-            };
-
             static constexpr auto ShowFrame = [](const ControlPanel& panel, std::size_t frame, bool visible) noexcept -> void {
                 (void)::ShowWindow(panel.frames[frame], HowOf(visible));
-                std::ranges::for_each(InnerRows(frame), [&panel, visible](const RowSpec& inner) { ShowRow(panel, inner, visible); });
+                std::ranges::for_each(InnerRows(frame), [&panel, visible](const RowSpec& inner) { ShowRow(panel, inner, HowOf(visible)); });
             };
             if (row.kind == Kind::Break)
                 return;
-            if (row.kind == Kind::Note)
-                (void)::ShowWindow(panel.notes[row.index], HowOf(visible));
-            else if (row.kind == Kind::Action)
-                ShowAll(ControlsOfAction(panel, row.index), HowOf(visible));
-            else if (row.kind == Kind::Folder)
-                ShowAll(ControlsOfFolder(panel, row.index), HowOf(visible));
-            else if (row.kind == Kind::Frame)
+            if (row.kind == Kind::Frame)
                 ShowFrame(panel, row.index, visible);
             else
-                ShowRow(panel, row, visible);
+                ShowRow(panel, row, HowOf(visible));
         };
         std::ranges::for_each(RowsOf(page), [&panel, visible](const RowSpec& row) { ShowRowOrFrame(panel, row, visible); });
     };
@@ -1565,6 +1628,15 @@ struct Notice
     return std::ranges::all_of(controls, IsPresent);
 }
 
+// A comparison row's count box and arrows are there exactly when its spec takes a count.
+[[nodiscard]] bool CountsAsSpecified(const ControlPanel& panel) noexcept
+{
+    static constexpr auto CountAsSpecified = [] [[nodiscard]] (const ControlPanel& panel, std::size_t s) noexcept -> bool {
+        return kSweeps[s].counted == IsPresent(panel.sweepBoxes[s]) && kSweeps[s].counted == IsPresent(panel.sweepSpins[s]);
+    };
+    return std::ranges::all_of(std::views::iota(std::size_t{ 0 }, kSweepCount), [&panel](std::size_t s) { return CountAsSpecified(panel, s); });
+}
+
 [[nodiscard]] bool ResetsAsSpecified(const ControlPanel& panel) noexcept
 {
     // A switch's reset is there exactly when its spec asks for one, so both a missing and a spare one is a fault.
@@ -1602,7 +1674,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
     // Advisory: the older common controls register their classes as they load and refuse this call, while
     // version 6 needs asking. Either way the controls are checked once built, which is the answer that counts.
     static constexpr auto InitialiseCommonControls = []() noexcept -> void {
-        INITCOMMONCONTROLSEX controls{ sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_UPDOWN_CLASS | ICC_TAB_CLASSES | ICC_LINK_CLASS };
+        INITCOMMONCONTROLSEX controls{ sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_UPDOWN_CLASS | ICC_TAB_CLASSES | ICC_LINK_CLASS | ICC_PROGRESS_CLASS };
         (void)::InitCommonControlsEx(&controls);
     };
 
@@ -2120,19 +2192,72 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         return CreateCommanded(parent, kActions[a].label, Bounds(m, at.left, at.control, kActionWidth, m.ControlHeight()), kActionCommand);
                     };
 
-                    // The time a recording has run stands beside the button that stops it, and says nothing until then.
-                    static constexpr auto CreateElapsed = [] [[nodiscard]] (HWND parent, const Metrics& m) noexcept -> HWND {
-                        const Placement at = PlaceOfRow(Kind::Action, static_cast<std::size_t>(Action::Record), m);
+                    // What a button has beside it: the time a recording has run, and a comparison capture's count of pictures.
+                    // Each says nothing until it is written.
+                    static constexpr auto CreateBeside = [] [[nodiscard]] (HWND parent, const Metrics& m, Action action) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Action, static_cast<std::size_t>(action), m);
                         return CreateChild(parent, WC_STATICW, L"", SS_LEFT | SS_CENTERIMAGE, 0, Bounds(m, at.left + kActionWidth + kMargin, at.control, kElapsedWidth, m.ControlHeight()));
                     };
                     built.actions = infra::Generated<HWND, kActionCount>([&](std::size_t a) { return CreateAction(parent, m, a); });
-                    built.recordingLabel = CreateElapsed(parent, m);
+                    built.recordingLabel = CreateBeside(parent, m, Action::Record);
+                    built.comparisonLabel = CreateBeside(parent, m, Action::Compare);
+                    return built;
+                };
+
+                // A comparison capture's rows: a switch for each setting and, for one that takes a count, a box of whole
+                // numbers with arrows that write it.
+                static constexpr auto BuildSweeps = [] [[nodiscard]] (HWND parent, const Metrics& m, Built built) noexcept -> Built {
+                    static constexpr auto CreateSweepCheck = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t s) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Sweep, s, m);
+                        const int width = kSweeps[s].counted ? at.width - kValuesWidth - kMargin : at.width;
+                        return CreateButton(parent, m, kSweeps[s].label, BS_AUTOCHECKBOX, at.left, at.control, width);
+                    };
+
+                    static constexpr auto CreateValuesBox = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t s) noexcept -> HWND {
+                        if (!kSweeps[s].counted)
+                            return nullptr;
+                        const Placement at = PlaceOfRow(Kind::Sweep, s, m);
+                        return CreateChild(parent, WC_EDITW, kDefaultValuesText, ES_RIGHT | ES_NUMBER | WS_TABSTOP, WS_EX_CLIENTEDGE,
+                                           Bounds(m, at.left + at.width - kValuesWidth, at.control, kValuesWidth, m.ControlHeight()));
+                    };
+
+                    // Told to write its box, since a count is a whole number, and kept apart from the fields' arrows by an index
+                    // past theirs.
+                    static constexpr auto CreateValuesSpin = [] [[nodiscard]] (HWND parent, HWND box, std::size_t s) noexcept -> HWND {
+                        static constexpr auto ArrangedSpin = [] [[nodiscard]] (HWND spin, HWND box, std::size_t s) noexcept -> HWND {
+                            (void)::SetWindowLongPtrW(spin, GWLP_USERDATA, static_cast<LONG_PTR>(kFieldCount + s));
+                            (void)::SendMessageW(spin, UDM_SETBUDDY, reinterpret_cast<WPARAM>(box), 0);
+                            (void)::SendMessageW(spin, UDM_SETRANGE32, static_cast<WPARAM>(interior::kMinSweepValues), static_cast<LPARAM>(interior::kMaxSweepValues));
+                            (void)::SendMessageW(spin, UDM_SETPOS32, 0, static_cast<LPARAM>(kDefaultValues));
+                            return spin;
+                        };
+                        if (box == nullptr)
+                            return nullptr;
+                        const HWND spin = ::CreateWindowExW(0, UPDOWN_CLASSW, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT | UDS_NOTHOUSANDS, 0,
+                                                            0, 0, 0, parent, nullptr, ::GetModuleHandleW(nullptr), nullptr);
+                        if (spin == nullptr)
+                            return nullptr;
+                        return ArrangedSpin(spin, box, s);
+                    };
+                    built.sweepChecks = infra::Generated<HWND, kSweepCount>([&](std::size_t s) { return CreateSweepCheck(parent, m, s); });
+                    built.sweepBoxes = infra::Generated<HWND, kSweepCount>([&](std::size_t s) { return CreateValuesBox(parent, m, s); });
+                    built.sweepSpins = infra::Generated<HWND, kSweepCount>([&](std::size_t s) { return CreateValuesSpin(parent, built.sweepBoxes[s], s); });
+                    return built;
+                };
+
+                // The bar that fills as a comparison capture goes along; empty until one runs.
+                static constexpr auto BuildProgress = [] [[nodiscard]] (HWND parent, const Metrics& m, Built built) noexcept -> Built {
+                    static constexpr auto CreateBar = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t p) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Progress, p, m);
+                        return CreateChild(parent, PROGRESS_CLASSW, nullptr, PBS_SMOOTH, 0, Bounds(m, at.left, at.control, at.width, m.ControlHeight()));
+                    };
+                    built.progress = infra::Generated<HWND, kProgressCount>([&](std::size_t p) { return CreateBar(parent, m, p); });
                     return built;
                 };
                 const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), findings, BuildFields(parent, m, StartingValues(o, live), Built{}));
                 const Built rows = BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), findings, numbers)));
                 const Built pages = BuildActions(parent, m, BuildFolders(parent, m, findings, BuildNotes(parent, m, rows)));
-                return BuildFrames(parent, m, pages);
+                return BuildFrames(parent, m, BuildProgress(parent, m, BuildSweeps(parent, m, pages)));
             };
 
             static constexpr auto CreateTabs = [] [[nodiscard]] (HWND parent, const Metrics& m) noexcept -> HWND {
@@ -2199,6 +2324,11 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.folderBrowsers,
                                  built.actions,
                                  built.recordingLabel,
+                                 built.sweepChecks,
+                                 built.sweepBoxes,
+                                 built.sweepSpins,
+                                 built.comparisonLabel,
+                                 built.progress,
                                  o.displayAffinity,
                                  o.clickThrough,
                                  findings.superResolution,
@@ -2221,15 +2351,16 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
 
                     static constexpr auto EveryRowPresent = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> bool {
                         // Every span here points into the panel itself, which outlives the answer.
-                        static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 17> {
-                            return { panel.labels,    panel.sliders,    panel.boxes,  panel.spins, panel.resets,       panel.toggles,     panel.groupLabels,    panel.pickLabels, panel.crosshairs,
-                                     panel.pickNames, panel.pickResets, panel.frames, panel.notes, panel.folderLabels, panel.folderBoxes, panel.folderBrowsers, panel.actions };
+                        static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 19> {
+                            return { panel.labels,      panel.sliders,        panel.boxes,     panel.spins,       panel.resets,  panel.toggles, panel.groupLabels,
+                                     panel.pickLabels,  panel.crosshairs,     panel.pickNames, panel.pickResets,  panel.frames,  panel.notes,   panel.folderLabels,
+                                     panel.folderBoxes, panel.folderBrowsers, panel.actions,   panel.sweepChecks, panel.progress };
                         };
-                        return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs) && IsPresent(panel.recordingLabel);
+                        return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs) && IsPresent(panel.recordingLabel) && IsPresent(panel.comparisonLabel);
                     };
                     return EveryRowPresent(panel) && AllPresent(Furniture(panel));
                 };
-                return EveryGroupPresent(panel) && ResetsAsSpecified(panel);
+                return EveryGroupPresent(panel) && ResetsAsSpecified(panel) && CountsAsSpecified(panel);
             };
 
             static constexpr auto DressPanel = [](const ControlPanel& panel) noexcept -> void {
@@ -2296,6 +2427,17 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                               [&panel, parent](std::size_t a) { AddHint(panel.tooltip, parent, panel.actions[a], kActions[a].hint); });
                     };
 
+                    // A comparison row's hint sits on its switch and, where there is one, on its count box.
+                    static constexpr auto HintSweeps = [](const ControlPanel& panel, HWND parent) noexcept -> void {
+                        static constexpr auto HintCount = [](const ControlPanel& panel, HWND parent, std::size_t s) noexcept -> void {
+                            if (panel.sweepBoxes[s] != nullptr)
+                                AddHint(panel.tooltip, parent, panel.sweepBoxes[s], kSweeps[s].hint);
+                        };
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kSweepCount),
+                                              [&panel, parent](std::size_t s) { AddHint(panel.tooltip, parent, panel.sweepChecks[s], kSweeps[s].hint); });
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kSweepCount), [&panel, parent](std::size_t s) { HintCount(panel, parent, s); });
+                    };
+
                     // A greyed control that says nothing is just a control that does not work, so the reason replaces the hint.
                     static constexpr auto HintMissingSuperResolution = [](const ControlPanel& panel, HWND parent) noexcept -> void {
                         if (panel.superResolution)
@@ -2315,6 +2457,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     HintNumbers(panel, parent);
                     HintChoices(panel, parent);
                     HintResets(panel, parent);
+                    HintSweeps(panel, parent);
                     HintMissingSuperResolution(panel, parent);
                     HintMissingOpticalFlow(panel, parent);
                 };
@@ -2410,6 +2553,10 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
                             return panel.folderLabels[row.index];
                         if (row.kind == Kind::Action)
                             return panel.actions[row.index];
+                        if (row.kind == Kind::Sweep)
+                            return panel.sweepChecks[row.index];
+                        if (row.kind == Kind::Progress)
+                            return panel.progress[row.index];
                         return MarkerOfRow(panel, row);
                     };
 
@@ -2548,9 +2695,26 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
             return interior::DirectoryPath::Parse(text.data()).value_or(interior::DirectoryPath{});
         };
         static constexpr auto TakenFrom = [] [[nodiscard]] (const ControlPanel& panel, Action action) noexcept -> bool { return Taken(panel.actions[static_cast<std::size_t>(action)]); };
+
+        // A comparison row's count box holds a whole number, read as typed; a row without one has a count of its own.
+        static constexpr auto ComparisonOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> ComparisonRequest {
+            static constexpr auto ValuesIn = [] [[nodiscard]] (HWND box) noexcept -> std::uint32_t {
+                if (box == nullptr)
+                    return 1;
+                const std::array<wchar_t, kTextCapacity> text = TextOf(box);
+                return static_cast<std::uint32_t>(std::wcstoul(text.data(), nullptr, 10));
+            };
+
+            static constexpr auto AxisOf = [] [[nodiscard]] (const ControlPanel& panel, std::size_t s) noexcept -> interior::SweepAxis {
+                return interior::SweepAxis{ IsChecked(panel.sweepChecks[s]), ValuesIn(panel.sweepBoxes[s]) };
+            };
+            return ComparisonRequest{ TakenFrom(panel, Action::Compare), infra::Generated<interior::SweepAxis, kSweepCount>([&panel](std::size_t s) { return AxisOf(panel, s); }) };
+        };
         const bool fromCapture = TakenFrom(panel, Action::Screenshot);
         const bool fromModel = TakenFrom(panel, Action::ModelScreenshot);
-        return CaptureRequest{ fromCapture || fromModel, TakenFrom(panel, Action::Record), FolderOf(panel), IsOn(panel, Toggle::AllParameters), IsOn(panel, Toggle::CaptureCursor) };
+        return CaptureRequest{
+            fromCapture || fromModel, TakenFrom(panel, Action::Record), FolderOf(panel), IsOn(panel, Toggle::AllParameters), IsOn(panel, Toggle::CaptureCursor), ComparisonOf(panel)
+        };
     };
     Arrange(panel);
     const interior::Fraction split = interior::FractionTag::Parse(SettledValue(panel, Field::Split)).value_or(*kCentre);
@@ -2694,6 +2858,45 @@ void ApplyRecording(const ControlPanel& panel, const std::optional<interior::Mic
     }
     WriteText(button, kStopLabel);
     WriteText(panel.recordingLabel, ElapsedText(*elapsed).data());
+}
+
+void ApplyComparison(const ControlPanel& panel, std::uint32_t planned, const std::optional<interior::SweepProgress>& running) noexcept
+{
+    static constexpr auto CountText = [] [[nodiscard]] (std::uint32_t planned) noexcept -> std::array<wchar_t, 32> {
+        std::array<wchar_t, 32> text{}; // WAIVER(R2): a local buffer filled once, before use.
+        (void)::_snwprintf_s(text.data(), text.size(), _TRUNCATE, L"%u pictures", static_cast<unsigned int>(planned));
+        return text;
+    };
+
+    static constexpr auto ProgressText = [] [[nodiscard]] (const interior::SweepProgress& p) noexcept -> std::array<wchar_t, 32> {
+        std::array<wchar_t, 32> text{}; // WAIVER(R2): a local buffer filled once, before use.
+        (void)::_snwprintf_s(text.data(), text.size(), _TRUNCATE, L"%u of %u", static_cast<unsigned int>(p.done), static_cast<unsigned int>(p.total));
+        return text;
+    };
+
+    // The bar is written only when it would move, since writing it repaints it on the thread that draws the picture.
+    static constexpr auto FillBar = [](HWND bar, std::uint32_t done, std::uint32_t total) noexcept -> void {
+        const int position = static_cast<int>(::SendMessageW(bar, PBM_GETPOS, 0, 0));
+        const int top = static_cast<int>(::SendMessageW(bar, PBM_GETRANGE, FALSE, 0));
+        if (top != static_cast<int>(total))
+            (void)::SendMessageW(bar, PBM_SETRANGE32, 0, static_cast<LPARAM>(total));
+        if (position != static_cast<int>(done))
+            (void)::SendMessageW(bar, PBM_SETPOS, static_cast<WPARAM>(done), 0);
+    };
+    const HWND button = panel.actions[static_cast<std::size_t>(Action::Compare)];
+    const HWND bar = panel.progress[static_cast<std::size_t>(Progress::Comparison)];
+    if (!running.has_value())
+    {
+        WriteText(button, kCompareLabel);
+        WriteText(panel.comparisonLabel, CountText(planned).data());
+        (void)::EnableWindow(button, planned > 0 ? TRUE : FALSE);
+        FillBar(bar, 0, 1);
+        return;
+    }
+    WriteText(button, kStopCompareLabel);
+    WriteText(panel.comparisonLabel, ProgressText(*running).data());
+    (void)::EnableWindow(button, TRUE);
+    FillBar(bar, running->done, std::max(running->total, 1u));
 }
 
 bool IsPanelClosed(const ControlPanel& panel) noexcept

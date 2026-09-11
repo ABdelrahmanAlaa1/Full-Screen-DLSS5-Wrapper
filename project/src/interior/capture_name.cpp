@@ -100,6 +100,16 @@ CaptureStem CaptureStemOf(const CaptureLabel& label, const LiveSettings& live, b
         .value_or(CaptureStem{});
 }
 
+CaptureStem PlainStemOf(const CaptureLabel& label, const CaptureMoment& when) noexcept
+{
+    return CaptureStem::Parse(infra::Formatted<CaptureStem::Capacity>("{}_{}-{}--{}-{}", label.Get(), when.month, when.day, when.hour, when.minute).Get()).value_or(CaptureStem{});
+}
+
+CaptureStem ComparisonFolderStemOf(const CaptureLabel& label, const CaptureMoment& when) noexcept
+{
+    return CaptureStem::Parse(infra::Formatted<CaptureStem::Capacity>("{}_multicapture_{}-{}--{}-{}", label.Get(), when.month, when.day, when.hour, when.minute).Get()).value_or(CaptureStem{});
+}
+
 CaptureStem NumberedStem(const CaptureStem& stem, std::uint32_t attempt) noexcept
 {
     if (attempt <= 1)

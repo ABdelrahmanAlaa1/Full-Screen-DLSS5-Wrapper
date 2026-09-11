@@ -284,7 +284,7 @@ void ConvertRows(const std::byte* rows, const Layout& layout, const FrameSize& s
 Result<VideoRecording, Error> StartRecording(const SnapshotOrder& order, interior::Instant now) noexcept
 {
     return EnsureCaptureFolder(order.folder)
-        .and_then([&] { return FreeCaptureNames(order.folder, interior::CaptureStemOf(order.label, order.live, order.everything, MomentNow()), kOriginalSuffix, kProcessedSuffix); })
+        .and_then([&] { return FreeCaptureNames(order.folder, interior::CaptureStemOf(order.label, order.live, order.everything, order.when), kOriginalSuffix, kProcessedSuffix); })
         .and_then([&](const CaptureFiles& files) {
             return Check(::MFStartup(MF_VERSION, MFSTARTUP_LITE), ApiCall::MfStartup).transform([&] { return VideoRecording{ files, std::nullopt, now, std::nullopt, {} }; });
         });

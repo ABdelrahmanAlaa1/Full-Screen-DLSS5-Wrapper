@@ -1,4 +1,5 @@
 #pragma once
+#include "effects/real/comparison.h"
 #include "effects/real/console.h"
 #include "effects/real/executor.h"
 #include "effects/real/panel.h"
@@ -78,6 +79,12 @@ private:
     // Encodes the frames whose copies have landed, which is what the slot about to be reused holds.
     [[nodiscard]] infra::Status<Error> DrainedRecording(interior::FrameSlot slot) noexcept;
     [[nodiscard]] infra::Status<Error> ToggledRecording(const PanelReading& reading, const SnapshotOrder& order) noexcept;
+    // Saves the comparison capture's picture of the frame just submitted, and ends it after the last.
+    [[nodiscard]] infra::Result<ExecutionReport, Error> ComparedFrame(const interior::FramePlan& plan, const ExecutionReport& report) noexcept;
+    [[nodiscard]] infra::Status<Error> ToggledComparison(const PanelReading& reading, const SnapshotOrder& order) noexcept;
+    [[nodiscard]] infra::Status<Error> FinishedComparison() noexcept;
+    [[nodiscard]] infra::Status<Error> EndedComparison(std::string_view what) noexcept;
+    void ShowComparison(const PanelReading& reading) noexcept;
     [[nodiscard]] infra::Status<Error> StoppedRecording() noexcept;
     [[nodiscard]] infra::Status<Error> ShowRecording() noexcept;
     [[nodiscard]] infra::Result<FrameStart, Error> Began(const Begun& begun) noexcept;
@@ -132,6 +139,7 @@ private:
     bool abandoned_;                          // WAIVER(R2): set once, when the window being followed stopped being on screen.
     std::optional<SnapshotOrder> snapshot_;   // WAIVER(R2): the screenshot the panel asked for this frame, taken after the frame and cleared then.
     std::optional<VideoRecording> recording_; // WAIVER(R2): the recording under way, replaced whole as frames are added and cleared when it stops.
+    std::optional<Comparison> comparison_;    // WAIVER(R2): the comparison capture under way, replaced whole as pictures are saved and cleared when it ends.
     std::optional<CursorOverlay> cursor_;     // WAIVER(R2): the cursor to draw into this frame's captures, replaced whole each frame.
     interior::Instant now_;                   // WAIVER(R2): this frame's clock reading, replaced whole per frame.
 };

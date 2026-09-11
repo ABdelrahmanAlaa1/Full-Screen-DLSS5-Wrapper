@@ -7,6 +7,7 @@
 #include "infrastructure/text.h"
 #include "interior/pyramid.h"
 
+#include <algorithm>
 #include <ranges>
 
 namespace real {
@@ -211,7 +212,7 @@ RealEnvironment::RealEnvironment(Gpu gpu, const SessionPlan& plan, OutputWindow 
     : gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
       frame_{ interior::FrameNumberTag::Parse(0), *kZeroSlot, *kZeroSet, false, fence }, stats_{ start, 0, 0 }, applied_(settings), clearedDepth_(plan.depth), restartWanted_(false), resized_(false),
       pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt), recording_(std::nullopt),
-      cursor_(std::nullopt), now_(start)
+      comparison_(std::nullopt), cursor_(std::nullopt), now_(start)
 {
 }
 
@@ -407,20 +408,34 @@ Result<FrameStart, Error> RealEnvironment::Began(const Begun& begun) noexcept
         };
         return ending ? Stopping(begun) : begun;
     };
+    // While a comparison capture runs, the frame runs the combination it asks for rather than what the panel says.
+    static constexpr auto Overridden = [] [[nodiscard]] (const Begun& begun, const std::optional<Comparison>& comparison) noexcept -> Begun {
+        static constexpr auto ControlsOf = [] [[nodiscard]] (const std::optional<Comparison>& comparison) noexcept -> std::optional<interior::LiveSettings> {
+            if (!comparison.has_value())
+                return std::nullopt;
+            return ComparisonControls(*comparison);
+        };
+        const std::optional<interior::LiveSettings> controls = ControlsOf(comparison);
+        if (!controls.has_value())
+            return begun;
+        interior::FrameInput input = begun.input; // WAIVER(R2): a copy with one answer replaced, read once after.
+        input.controlRequest = controls;
+        return Begun{ begun.frame, input, begun.reading };
+    };
     now_ = begun.input.now; // WAIVER(R2): this frame's clock reading, replaced whole per frame.
     Followed(begun.input.now);
     Reconsidered(begun.input.now);
     return DrainedRecording(begun.frame.slot).and_then([this, &begun] { return SettledIfRead(begun.reading); }).and_then([this] { return ShowRecording(); }).and_then([this, &begun] {
-        return Accept(StoppedIf(begun, AsksToEnd()));
+        return Accept(Overridden(StoppedIf(begun, AsksToEnd()), comparison_));
     });
 }
 
 Result<FrameStart, Error> RealEnvironment::BeginFrame(const interior::FrameState& state) noexcept
 {
-    static constexpr auto Begin = [] [[nodiscard]] (const Gpu& gpu, const Surroundings& s, std::uint32_t finestPixels, interior::FenceValue fence,
-                                                    const interior::FrameState& state) noexcept -> Result<Begun, Error> {
+    static constexpr auto Begin = [] [[nodiscard]] (const Gpu& gpu, const Surroundings& s, std::uint32_t finestPixels, interior::FenceValue fence, const interior::FrameState& state,
+                                                    bool held) noexcept -> Result<Begun, Error> {
         static constexpr auto Prepare = [] [[nodiscard]] (const Gpu& gpu, const Surroundings& s, const WindowEvents& events, std::uint32_t finestPixels, const interior::FrameState& state,
-                                                          interior::FrameSlot slot) noexcept -> Result<Prepared, Error> {
+                                                          interior::FrameSlot slot, bool held) noexcept -> Result<Prepared, Error> {
             static constexpr auto AwaitSlot = [] [[nodiscard]] (const Gpu& gpu, const interior::FrameState& state, interior::FrameSlot slot) noexcept -> Status<Error> {
                 return WaitForFence(gpu.device, state.slotFences[slot.Get()], interior::MicrosecondsTag::Parse(kFenceTimeoutMicroseconds)).and_then([&] {
                     return Check(gpu.allocators[slot.Get()]->Reset(), ApiCall::ResetAllocator);
@@ -445,7 +460,15 @@ Result<FrameStart, Error> RealEnvironment::BeginFrame(const interior::FrameState
             };
 
             static constexpr auto Sampled = [] [[nodiscard]] (const Gpu& gpu, const Surroundings& s, const WindowEvents& events, std::optional<interior::Fraction> unmatched,
-                                                              const interior::FrameState& state) noexcept -> Result<Prepared, Error> {
+                                                              const interior::FrameState& state, bool held) noexcept -> Result<Prepared, Error> {
+                // A comparison capture works on the frame it started with, so no new one is taken while it runs: the
+                // canvas keeps that frame, and the frames arriving meanwhile are left with the capture.
+                static constexpr auto AcquiredUnlessHeld = [] [[nodiscard]] (const Gpu& gpu, interior::FrameNumber number, bool held) noexcept -> Result<bool, Error> {
+                    if (held)
+                        return false;
+                    return AcquireFrames(gpu.capture, number);
+                };
+
                 static constexpr auto ReadingOf = [] [[nodiscard]] (const ControlPanel* panel, const WindowEvents& events, const std::optional<interior::Fraction>& drag,
                                                                     const interior::FrameState& state) noexcept -> std::optional<PanelReading> {
                     static constexpr auto SteerPanel = [](const ControlPanel& panel, const WindowEvents& events, const std::optional<interior::Fraction>& drag,
@@ -470,7 +493,7 @@ Result<FrameStart, Error> RealEnvironment::BeginFrame(const interior::FrameState
                 static constexpr auto PanelWasClosed = [] [[nodiscard]] (const ControlPanel* panel) noexcept -> bool { return panel != nullptr && IsPanelClosed(*panel); };
                 const std::optional<interior::Fraction> drag = SplitRequest(s.window);
                 const std::optional<PanelReading> reading = ReadingOf(s.panel, events, drag, state);
-                return AcquireFrames(gpu.capture, state.number).and_then([&](bool fresh) {
+                return AcquiredUnlessHeld(gpu, state.number, held).and_then([&](bool fresh) {
                     return Now().and_then([&](interior::Instant now) {
                         return CurrentBackBuffer(gpu.presenter).transform([&](interior::BackBufferIndex index) {
                             return Prepared{ fresh, index, unmatched, now, drag, reading, PanelWasClosed(s.panel) };
@@ -481,7 +504,7 @@ Result<FrameStart, Error> RealEnvironment::BeginFrame(const interior::FrameState
             return WaitForNextFrame(gpu.presenter)
                 .and_then([&] { return AwaitSlot(gpu, state, slot); })
                 .and_then([&] { return ReadUnmatched(gpu, finestPixels, state, slot); })
-                .and_then([&](std::optional<interior::Fraction> unmatched) { return Sampled(gpu, s, events, unmatched, state); });
+                .and_then([&](std::optional<interior::Fraction> unmatched) { return Sampled(gpu, s, events, unmatched, state, held); });
         };
 
         static constexpr auto InputOf = [] [[nodiscard]] (const WindowEvents& events, const Prepared& p) noexcept -> interior::FrameInput {
@@ -516,10 +539,10 @@ Result<FrameStart, Error> RealEnvironment::BeginFrame(const interior::FrameState
         };
         const interior::FrameSlot slot = interior::SlotOfFrame(state.number);
         return PumpEvents(s.window).and_then([&](const WindowEvents& events) {
-            return Prepare(gpu, s, events, finestPixels, state, slot).transform([&](const Prepared& p) { return Begun{ ContextOf(state, slot, fence), InputOf(events, p), p.reading }; });
+            return Prepare(gpu, s, events, finestPixels, state, slot, held).transform([&](const Prepared& p) { return Begun{ ContextOf(state, slot, fence), InputOf(events, p), p.reading }; });
         });
     };
-    return Begin(gpu_, Surroundings{ window_, panel_ }, finestPixels_, frame_.fence, state).and_then([this](const Begun& begun) { return Began(begun); });
+    return Begin(gpu_, Surroundings{ window_, panel_ }, finestPixels_, frame_.fence, state, comparison_.has_value()).and_then([this](const Begun& begun) { return Began(begun); });
 }
 
 Result<FrameStart, Error> RealEnvironment::Accept(const Begun& begun) noexcept
@@ -643,7 +666,7 @@ Status<Error> RealEnvironment::Settled(const PanelReading& reading) noexcept
                 return interior::CaptureLabel::Parse(interior::kDesktopLabel).value_or(interior::CaptureLabel{});
             return interior::CaptureLabelOf(TitleOfWindow(*followed).Get());
         };
-        return SnapshotOrder{ reading.capture.folder, LabelOf(followed), reading.live, reading.capture.everything };
+        return SnapshotOrder{ reading.capture.folder, LabelOf(followed), reading.live, reading.capture.everything, MomentNow(), Pictures::Both };
     };
 
     static constexpr auto ScreenshotOf = [] [[nodiscard]] (const PanelReading& reading, const SnapshotOrder& order) noexcept -> std::optional<SnapshotOrder> {
@@ -674,10 +697,67 @@ Status<Error> RealEnvironment::Settled(const PanelReading& reading) noexcept
     return Resurfaced(surface)
         .and_then([this, &reading] { return Recleared(reading.live.depth); })
         .and_then([this, &reading, &order] { return ToggledRecording(reading, order); })
-        .transform([this, &reading, &order] {
+        .and_then([this, &reading, &order] {
             snapshot_ = ScreenshotOf(reading, order); // WAIVER(R2): what this frame's reading asked for, replaced whole each frame.
             cursor_ = OverlayOf(reading, applied_);   // WAIVER(R2): the cursor this frame's captures get, replaced whole each frame.
-        });
+            return ToggledComparison(reading, order);
+        })
+        .transform([this, &reading] { ShowComparison(reading); });
+}
+
+namespace {
+
+// How far a comparison capture has got and where its pictures are, for the log.
+[[nodiscard]] Status<Error> NotedComparison(const Console& console, std::string_view what, const Comparison& c, interior::Instant now) noexcept
+{
+    const std::array<char, interior::DirectoryPath::Capacity + 1> folder = infra::NarrowedChars<interior::DirectoryPath::Capacity + 1>(c.base.folder.Get());
+    const double seconds = static_cast<double>(now.Get() - std::min(now.Get(), c.started.Get())) / 1000000.0;
+    return Log(console, interior::LogLevel::Info, infra::Formatted<420>("{}: {} of {} pictures in {} after {:.1f} s", what, c.done, c.total, folder.data(), seconds).Get());
+}
+
+} // namespace
+
+// The button starts a comparison capture when none is running and stops the one that is. One with nothing
+// checked would take no pictures, so it is not started.
+Status<Error> RealEnvironment::ToggledComparison(const PanelReading& reading, const SnapshotOrder& order) noexcept
+{
+    if (!reading.capture.comparison.start)
+        return {};
+    if (comparison_.has_value())
+        return EndedComparison("comparison capture stopped");
+    if (interior::SweepCount(reading.capture.comparison.axes) == 0)
+        return {};
+    return StartComparison(order, reading.capture.comparison.axes, cursor_, now_).and_then([this](const Comparison& started) {
+        comparison_ = started; // WAIVER(R2): the comparison under way, replaced whole.
+        return NotedComparison(console_, "comparison capture started", started, now_);
+    });
+}
+
+Status<Error> RealEnvironment::EndedComparison(std::string_view what) noexcept
+{
+    if (!comparison_.has_value())
+        return {};
+    const Comparison ended = *comparison_;
+    comparison_ = std::nullopt; // WAIVER(R2): the comparison ended, replaced whole.
+    return NotedComparison(console_, what, ended, now_);
+}
+
+Status<Error> RealEnvironment::FinishedComparison() noexcept
+{
+    if (!comparison_.has_value() || !IsComparisonDone(*comparison_))
+        return {};
+    return EndedComparison("comparison capture done");
+}
+
+void RealEnvironment::ShowComparison(const PanelReading& reading) noexcept
+{
+    static constexpr auto RunningOf = [] [[nodiscard]] (const std::optional<Comparison>& comparison) noexcept -> std::optional<interior::SweepProgress> {
+        if (!comparison.has_value())
+            return std::nullopt;
+        return ProgressOf(*comparison);
+    };
+    if (panel_ != nullptr)
+        ApplyComparison(*panel_, interior::SweepCount(reading.capture.comparison.axes), RunningOf(comparison_));
 }
 
 Status<Error> RealEnvironment::ToggledRecording(const PanelReading& reading, const SnapshotOrder& order) noexcept
@@ -704,7 +784,7 @@ Status<Error> RealEnvironment::StoppedRecording() noexcept
 
 Status<Error> RealEnvironment::Finished() noexcept
 {
-    return StoppedRecording();
+    return StoppedRecording().and_then([this] { return EndedComparison("comparison capture ended with the session"); });
 }
 
 Status<Error> RealEnvironment::DrainedRecording(interior::FrameSlot slot) noexcept
@@ -779,6 +859,17 @@ Result<ExecutionReport, Error> RealEnvironment::Captured(const interior::FramePl
     });
 }
 
+Result<ExecutionReport, Error> RealEnvironment::ComparedFrame(const interior::FramePlan& plan, const ExecutionReport& report) noexcept
+{
+    if (!comparison_.has_value())
+        return report;
+    return CapturedComparison(gpu_, frame_, plan.next, *comparison_).and_then([this, &report](const Compared& c) {
+        comparison_ = c.comparison;          // WAIVER(R2): the comparison under way, replaced whole as pictures are saved.
+        frame_ = WithFence(frame_, c.fence); // WAIVER(R2): the last signalled fence, replaced whole.
+        return FinishedComparison().transform([&] { return ExecutionReport{ c.fence, report.stepsExecuted }; });
+    });
+}
+
 Result<ExecutionReport, Error> RealEnvironment::RecordedFrame(const interior::FramePlan& plan, const ExecutionReport& report) noexcept
 {
     if (!recording_.has_value())
@@ -795,6 +886,7 @@ Result<ExecutionReport, Error> RealEnvironment::Execute(const interior::FramePla
     return Retuned(plan.next.controls)
         .and_then([this, &plan](const ExecutionReport&) { return Ran(plan); })
         .and_then([this, &plan](const ExecutionReport& report) { return Captured(plan, report); })
+        .and_then([this, &plan](const ExecutionReport& report) { return ComparedFrame(plan, report); })
         .and_then([this, &plan](const ExecutionReport& report) { return RecordedFrame(plan, report); });
 }
 

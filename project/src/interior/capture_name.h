@@ -36,6 +36,12 @@ constexpr std::string_view kWindowLabel = "Window";
 // The same name with a count on the end, for when the first is taken. The first attempt is the name itself.
 [[nodiscard]] CaptureStem NumberedStem(const CaptureStem& stem, std::uint32_t attempt) noexcept;
 
+// A name with the source and the minute alone, for a picture no setting shaped.
+[[nodiscard]] CaptureStem PlainStemOf(const CaptureLabel& label, const CaptureMoment& when) noexcept;
+
+// The folder a comparison capture's pictures go into, named for the source and the minute.
+[[nodiscard]] CaptureStem ComparisonFolderStemOf(const CaptureLabel& label, const CaptureMoment& when) noexcept;
+
 // Where captures go unless the operator says otherwise: a Captures folder next to the executable.
 [[nodiscard]] DirectoryPath DefaultCaptureFolder(const DirectoryPath& executableDirectory) noexcept;
 

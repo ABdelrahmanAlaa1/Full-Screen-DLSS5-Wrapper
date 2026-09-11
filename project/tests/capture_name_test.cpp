@@ -120,6 +120,16 @@ using namespace interior;
     return numbered.Get() == std::string(stem.Get()) + "_" + std::to_string(attempt);
 }
 
+[[nodiscard]] bool ThePlainStemIsTheLabelAndTheMoment(infra::RngState& rng) noexcept
+{
+    const CaptureMoment when = RandomMoment(rng);
+    const CaptureLabel label = CaptureLabelOf(RandomTitle(rng));
+    const std::string moment = std::to_string(when.month) + "-" + std::to_string(when.day) + "--" + std::to_string(when.hour) + "-" + std::to_string(when.minute);
+    const bool plain = PlainStemOf(label, when).Get() == std::string(label.Get()) + "_" + moment;
+    const bool folder = ComparisonFolderStemOf(label, when).Get() == std::string(label.Get()) + "_multicapture_" + moment;
+    return plain && folder;
+}
+
 [[nodiscard]] bool TheDefaultFolderIsCapturesBesideTheExecutable(infra::RngState& rng) noexcept
 {
     const std::wstring directory = std::wstring(L"C:\\Games\\") + std::wstring(proptest::DrawBelow(rng, 20), L'x');
@@ -139,6 +149,7 @@ std::uint32_t CaptureNameSuite(std::uint64_t seed) noexcept
     failures += Failures(proptest::ForAll("The stem counts passes and intensity when they are not the default", seed, 300, TheStemCountsPassesAndIntensityWhenTheyAreNotTheDefault));
     failures += Failures(proptest::ForAll("The stem begins with the label and ends with the moment", seed, 300, TheStemBeginsWithTheLabelAndEndsWithTheMoment));
     failures += Failures(proptest::ForAll("Numbering adds a count from two", seed, 300, NumberingAddsACountFromTwo));
+    failures += Failures(proptest::ForAll("The plain stem is the label and the moment", seed, 300, ThePlainStemIsTheLabelAndTheMoment));
     return failures;
 }
 

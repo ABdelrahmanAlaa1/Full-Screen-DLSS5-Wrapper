@@ -70,7 +70,31 @@ namespace {
     return ::GetFileAttributesW(path.CString()) != INVALID_FILE_ATTRIBUTES;
 }
 
+[[nodiscard]] Result<interior::DirectoryPath, Error> FolderOf(const interior::DirectoryPath& parent, const interior::CaptureStem& stem) noexcept
+{
+    const std::array<wchar_t, interior::CaptureStem::Capacity + 1> name = infra::WidenedChars<interior::CaptureStem::Capacity + 1>(stem.Get());
+    std::array<wchar_t, interior::DirectoryPath::Capacity + 1> path{}; // WAIVER(R2): a local buffer filled once, before use.
+    if (::_snwprintf_s(path.data(), path.size(), _TRUNCATE, L"%s\\%s", parent.CString(), name.data()) < 0)
+        return Fail(Error{ ApiCall::CapturePathTooLong, 0 });
+    return interior::DirectoryPath::Parse(path.data()).transform_error([](infra::StringTooLong) { return Error{ ApiCall::CapturePathTooLong, 0 }; });
+}
+
+[[nodiscard]] bool FolderExists(const interior::DirectoryPath& path) noexcept
+{
+    return ::GetFileAttributesW(path.CString()) != INVALID_FILE_ATTRIBUTES;
+}
+
 } // namespace
+
+Result<interior::DirectoryPath, Error> MadeCaptureFolder(const interior::DirectoryPath& parent, const interior::CaptureStem& stem) noexcept
+{
+    static constexpr auto IsFree = [] [[nodiscard]] (const Result<interior::DirectoryPath, Error>& folder) noexcept -> bool { return !folder.has_value() || !FolderExists(*folder); };
+    const auto attempts = std::views::iota(std::uint32_t{ 1 }, kMaxAttempts + 1);
+    const auto found = std::ranges::find_if(attempts, [&](std::uint32_t attempt) { return IsFree(FolderOf(parent, interior::NumberedStem(stem, attempt))); });
+    if (found == attempts.end())
+        return Fail(Error{ ApiCall::CaptureNameTaken, 0 });
+    return FolderOf(parent, interior::NumberedStem(stem, *found)).and_then([](const interior::DirectoryPath& folder) { return EnsureCaptureFolder(folder).transform([&folder] { return folder; }); });
+}
 
 Result<CaptureFiles, Error> FreeCaptureNames(const interior::DirectoryPath& folder, const interior::CaptureStem& stem, const wchar_t* originalSuffix, const wchar_t* processedSuffix) noexcept
 {
@@ -318,19 +342,33 @@ struct Overlaid
 
 Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order, const std::optional<CursorOverlay>& cursor) noexcept
 {
-    static constexpr auto WrittenBoth = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files, const std::optional<CursorOverlay>& cursor) noexcept -> Status<Error> {
+    // Both pictures are copied whichever are written: the cursor is placed by the original's size, and a copy
+    // costs nothing beside a file.
+    static constexpr auto WrittenWanted = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files, const std::optional<CursorOverlay>& cursor, Pictures pictures) noexcept -> Status<Error> {
+        static constexpr auto WrittenIf = [] [[nodiscard]] (bool wanted, IWICImagingFactory* wic, const Readback& readback, const Overlaid& overlaid,
+                                                            const interior::FilePath& path) noexcept -> Status<Error> {
+            if (!wanted)
+                return {};
+            return WrittenOut(wic, readback, overlaid, path);
+        };
         const Overlaid overlaid{ SizeOf(r.original.layout), cursor };
         return WicFactory().and_then([&](const Com<IWICImagingFactory>& wic) {
-            return WrittenOut(wic.Get(), r.original, overlaid, files.original).and_then([&] { return WrittenOut(wic.Get(), r.processed, overlaid, files.processed); });
-        });
-    };
-    return EnsureCaptureFolder(order.folder)
-        .and_then([&] { return FreeCaptureNames(order.folder, interior::CaptureStemOf(order.label, order.live, order.everything, MomentNow()), kOriginalSuffix, kProcessedSuffix); })
-        .and_then([&](const CaptureFiles& files) {
-            return CopiedBoth(gpu, frame, after).and_then([&](const Copied& copied) {
-                return WrittenBoth(copied.readbacks, files, cursor).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
+            return WrittenIf(pictures != Pictures::Processed, wic.Get(), r.original, overlaid, files.original).and_then([&] {
+                return WrittenIf(pictures != Pictures::Original, wic.Get(), r.processed, overlaid, files.processed);
             });
         });
+    };
+
+    static constexpr auto StemOf = [] [[nodiscard]] (const SnapshotOrder& order) noexcept -> interior::CaptureStem {
+        if (order.pictures == Pictures::Original)
+            return interior::PlainStemOf(order.label, order.when);
+        return interior::CaptureStemOf(order.label, order.live, order.everything, order.when);
+    };
+    return EnsureCaptureFolder(order.folder).and_then([&] { return FreeCaptureNames(order.folder, StemOf(order), kOriginalSuffix, kProcessedSuffix); }).and_then([&](const CaptureFiles& files) {
+        return CopiedBoth(gpu, frame, after).and_then([&](const Copied& copied) {
+            return WrittenWanted(copied.readbacks, files, cursor, order.pictures).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
+        });
+    });
 }
 
 } // namespace real
