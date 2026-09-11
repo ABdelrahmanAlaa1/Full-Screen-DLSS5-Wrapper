@@ -47,4 +47,20 @@ struct SweepProgress
 // it compares nothing.
 [[nodiscard]] LiveSettings SweepCombination(const LiveSettings& base, const SweepSpec& spec, std::uint32_t index) noexcept;
 
+// Diagnostic for one compiler, removed once the difference is understood.
+struct SweepDiagnostic
+{
+    int swept0;
+    int on0;
+    std::uint32_t values0;
+    std::uint32_t digit0;
+    float base0;
+    float byValue;
+    float byReference;
+    float swapped;
+    float skin;
+    float structure;
+};
+[[nodiscard]] SweepDiagnostic DiagnoseSweep(const LiveSettings& base, const SweepSpec& spec) noexcept;
+
 } // namespace interior

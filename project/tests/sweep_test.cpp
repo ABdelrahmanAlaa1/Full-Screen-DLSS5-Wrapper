@@ -113,6 +113,10 @@ constexpr float kTolerance = 1e-5f;
         SweepSpec onlyStructure{};
         onlyStructure[1] = SweepAxis{ true, 2 };
         const float v = base.tuning.intensity.Get();
+        const SweepDiagnostic d = DiagnoseSweep(base, spec);
+        std::printf("diag3 swept0=%d on0=%d values0=%u digit0=%u base0=%.9g byValue=%.9g byReference=%.9g swapped=%.9g skin=%.9g structure=%.9g\n", d.swept0, d.on0, d.values0, d.digit0,
+                    static_cast<double>(d.base0), static_cast<double>(d.byValue), static_cast<double>(d.byReference), static_cast<double>(d.swapped), static_cast<double>(d.skin),
+                    static_cast<double>(d.structure));
         std::printf("diag2 values0=%u parsed=%.9g valueor=%.9g int/only-int[0]=%.9g int/only-int[1]=%.9g int/only-struc[1]=%.9g struc/only-struc[1]=%.9g\n",
                     SweepValuesOf(spec, SweepParameter::Intensity), static_cast<double>((*NrIntensityTag::Parse(v)).Get()),
                     static_cast<double>(NrIntensityTag::Parse(v).value_or(base.tuning.intensity).Get()), static_cast<double>(SweepCombination(base, onlyIntensity, 0).tuning.intensity.Get()),

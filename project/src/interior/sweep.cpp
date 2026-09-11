@@ -52,11 +52,26 @@ struct Counting
 }
 
 // A setting not swept is the one the base holds, untouched; one swept runs from nothing up to what the base holds.
-[[nodiscard]] NrIntensity IntensityOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+[[nodiscard]] NrIntensity IntensityOf(NrIntensity held, const SweepSpec& spec, const Digits& digits) noexcept
+{
+    if (!IsSwept(spec, SweepParameter::Intensity))
+        return held;
+    return NrIntensityTag::Parse(SweptTo(held.Get(), spec, digits, SweepParameter::Intensity)).value_or(held);
+}
+
+// Diagnostic for one compiler, removed once the difference is understood: the same question asked several ways.
+[[nodiscard]] NrIntensity IntensityByReference(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
 {
     if (!IsSwept(spec, SweepParameter::Intensity))
         return base.intensity;
     return NrIntensityTag::Parse(SweptTo(base.intensity.Get(), spec, digits, SweepParameter::Intensity)).value_or(base.intensity);
+}
+
+[[nodiscard]] NrIntensity IntensitySwapped(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+{
+    if (IsSwept(spec, SweepParameter::Intensity))
+        return NrIntensityTag::Parse(SweptTo(base.intensity.Get(), spec, digits, SweepParameter::Intensity)).value_or(base.intensity);
+    return base.intensity;
 }
 
 [[nodiscard]] Strength StrengthOf(Strength held, const SweepSpec& spec, const Digits& digits, SweepParameter parameter) noexcept
@@ -79,31 +94,38 @@ struct Counting
     return SkinStrengthTag::Parse(SweptTo(TopOf(base), spec, digits, SweepParameter::SkinStructure)).value_or(base.skinStructure);
 }
 
-[[nodiscard]] NrStyle StyleOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+[[nodiscard]] NrStyle StyleAt(std::uint32_t digit) noexcept
 {
     constexpr std::array<NrStyle, kStyleValues> styles{ NrStyle::Standard, NrStyle::Natural, NrStyle::Cinematic };
-    if (!IsSwept(spec, SweepParameter::Style))
-        return base.style;
-    return styles[std::min<std::size_t>(DigitOf(digits, SweepParameter::Style), styles.size() - 1)];
+    return styles[std::min<std::size_t>(digit, styles.size() - 1)];
 }
 
-[[nodiscard]] bool MaskOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+// Skin following local structure is the model's -1, so what skin runs up to is then what local structure has.
+[[nodiscard]] float SkinTop(const NrTuning& t) noexcept
 {
-    if (!IsSwept(spec, SweepParameter::AutoMask))
-        return base.autoMask;
-    return DigitOf(digits, SweepParameter::AutoMask) == 1;
+    if (t.skinStructure.Get() < 0.0f)
+        return t.localStructure.Get();
+    return t.skinStructure.Get();
 }
 
+// WAIVER(R2): a copy of the base with each swept setting written over once; a setting not swept is never
+// touched, so it stays exactly what the base holds.
 [[nodiscard]] NrTuning TuningOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
 {
-    return NrTuning{ base.preset,
-                     IntensityOf(base, spec, digits),
-                     StyleOf(base, spec, digits),
-                     StrengthOf(base.localStructure, spec, digits, SweepParameter::LocalStructure),
-                     StrengthOf(base.localTone, spec, digits, SweepParameter::LocalTone),
-                     SkinOf(base, spec, digits),
-                     MaskOf(base, spec, digits),
-                     base.uiCorrection };
+    NrTuning tuning = base;
+    if (IsSwept(spec, SweepParameter::Intensity))
+        tuning.intensity = NrIntensityTag::Parse(SweptTo(base.intensity.Get(), spec, digits, SweepParameter::Intensity)).value_or(base.intensity);
+    if (IsSwept(spec, SweepParameter::LocalStructure))
+        tuning.localStructure = StrengthTag::Parse(SweptTo(base.localStructure.Get(), spec, digits, SweepParameter::LocalStructure)).value_or(base.localStructure);
+    if (IsSwept(spec, SweepParameter::LocalTone))
+        tuning.localTone = StrengthTag::Parse(SweptTo(base.localTone.Get(), spec, digits, SweepParameter::LocalTone)).value_or(base.localTone);
+    if (IsSwept(spec, SweepParameter::SkinStructure))
+        tuning.skinStructure = SkinStrengthTag::Parse(SweptTo(SkinTop(base), spec, digits, SweepParameter::SkinStructure)).value_or(base.skinStructure);
+    if (IsSwept(spec, SweepParameter::Style))
+        tuning.style = StyleAt(DigitOf(digits, SweepParameter::Style));
+    if (IsSwept(spec, SweepParameter::AutoMask))
+        tuning.autoMask = DigitOf(digits, SweepParameter::AutoMask) == 1;
+    return tuning;
 }
 
 [[nodiscard]] PassCount PassesOf(const LiveSettings& base, const SweepSpec& spec, const Digits& digits) noexcept
@@ -137,10 +159,31 @@ std::uint32_t SweepCount(const SweepSpec& spec) noexcept
     return std::ranges::fold_left(parameters, std::uint32_t{ 1 }, [&spec](std::uint32_t so, std::size_t p) { return so * SweepValuesOf(spec, static_cast<SweepParameter>(p)); });
 }
 
+// WAIVER(R2): a copy of the base with the model switched on, its tuning replaced and its passes written over
+// when they are swept; everything else stays what the base holds.
 LiveSettings SweepCombination(const LiveSettings& base, const SweepSpec& spec, std::uint32_t index) noexcept
 {
     const Digits digits = DigitsOf(spec, index);
-    return LiveSettings{ true, TuningOf(base.tuning, spec, digits), PassesOf(base, spec, digits), base.depthInverted, base.mvScaleX, base.mvScaleY, base.vsync, base.resetThreshold, base.depth };
+    LiveSettings live = base;
+    live.neuralRendering = true;
+    live.tuning = TuningOf(base.tuning, spec, digits);
+    live.passes = PassesOf(base, spec, digits);
+    return live;
+}
+
+SweepDiagnostic DiagnoseSweep(const LiveSettings& base, const SweepSpec& spec) noexcept
+{
+    const Digits digits = DigitsOf(spec, 0);
+    return SweepDiagnostic{ IsSwept(spec, SweepParameter::Intensity) ? 1 : 0,
+                            spec[0].on ? 1 : 0,
+                            SweepValuesOf(spec, SweepParameter::Intensity),
+                            DigitOf(digits, SweepParameter::Intensity),
+                            base.tuning.intensity.Get(),
+                            IntensityOf(base.tuning.intensity, spec, digits).Get(),
+                            IntensityByReference(base.tuning, spec, digits).Get(),
+                            IntensitySwapped(base.tuning, spec, digits).Get(),
+                            SkinOf(base.tuning, spec, digits).Get(),
+                            StrengthOf(base.tuning.localStructure, spec, digits, SweepParameter::LocalStructure).Get() };
 }
 
 } // namespace interior
