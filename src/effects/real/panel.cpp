@@ -66,12 +66,13 @@ constexpr int kExpanderWidth = 28;
 
 constexpr int kMinRowsPerColumn = 7;
 constexpr int kMaxRowsPerColumn = 16;
-// Vertical room is counted in half rows: a row is two of them, and a frame's caption above its first row
-// and its bottom edge below its last take one each, so a frame costs one row more than what it holds.
-constexpr std::size_t kUnitsPerRow = 2;
-constexpr std::size_t kCaptionUnits = 1;
+// The room around the rows, in reference pixels. Each row ends with the gap; a frame's caption band and
+// its bottom edge are on top of what the rows in it take.
+constexpr int kRowGap = 6;      // under a row's control, before whatever stands next
+constexpr int kCaptionGap = 8;  // between a frame's caption and the first row in it
+constexpr int kFrameBottom = 4; // between the last row's gap and the frame's bottom edge
+constexpr int kFrameGap = 10;   // between a frame's bottom edge and whatever stands under it
 constexpr int kFrameInset = 10; // how far the rows inside a frame stand in from its edge, on either side
-constexpr int kFrameGap = 14;   // the room between a frame's bottom edge and whatever stands under it
 
 // Each slider counts in steps of a unit: 1 counts whole numbers, 100 counts hundredths. A range says how
 // far a slider reaches, not what the model accepts; the command line still takes any finite value.
@@ -352,18 +353,21 @@ struct Metrics
 {
     int dpi;
     int line;
-    int units;               // half rows to a column, taken from whichever page needs the most
+    int column;              // how tall a column is, taken from whichever page needs the most
     int body;                // how tall the notice's own text is, measured in the font it is drawn in
     const PanelLists* lists; // borrowed for as long as the panel is being built, which is the only time it is read
     [[nodiscard]] int Of(int reference) const noexcept { return ::MulDiv(reference, dpi, kReferenceDpi); }
-    [[nodiscard]] int LabelHeight() const noexcept { return line + Of(5); }
-    [[nodiscard]] int ControlHeight() const noexcept { return std::max(Of(22), line + Of(9)); }
-    // A row is a label, a control and a gap under them; half of that is the unit the columns are counted in.
-    [[nodiscard]] int Unit() const noexcept { return (LabelHeight() + ControlHeight() + Of(10) + 1) / 2; }
+    [[nodiscard]] int LabelHeight() const noexcept { return line + Of(3); }
+    [[nodiscard]] int ControlHeight() const noexcept { return std::max(Of(22), line + Of(6)); }
+    [[nodiscard]] int RowGap() const noexcept { return Of(kRowGap); }
+    // A labelled row, which is what most rows are and what a column is counted in.
+    [[nodiscard]] int RowHeight() const noexcept { return LabelHeight() + ControlHeight() + RowGap(); }
+    // From a frame's top edge, where its caption is written, to the first row in it.
+    [[nodiscard]] int CaptionHeight() const noexcept { return line + Of(kCaptionGap); }
     [[nodiscard]] int PageTop() const noexcept { return Of(kMargin + kTabHeight); }
     // The rows, then the notice under them, then the margin.
-    [[nodiscard]] int PageHeight() const noexcept { return units * Unit() + ControlHeight() + Of(2 * kMargin); }
-    [[nodiscard]] int NoticeTop() const noexcept { return PageTop() + units * Unit() + Of(kMargin); }
+    [[nodiscard]] int PageHeight() const noexcept { return column + ControlHeight() + Of(2 * kMargin); }
+    [[nodiscard]] int NoticeTop() const noexcept { return PageTop() + column + Of(kMargin); }
     [[nodiscard]] int BodyHeight() const noexcept { return body + Of(kMargin); }
 };
 
@@ -375,28 +379,40 @@ struct Placement
     int width; // in reference pixels: the column, or what is left of it inside a frame
 };
 
-[[nodiscard]] std::size_t UnitsOf(const RowSpec& row, const PanelLists& lists) noexcept
+// How much of a column a row takes, in the display's dots, the gap under it included.
+[[nodiscard]] int HeightOf(const RowSpec& row, const Metrics& m) noexcept
 {
-    // A row holding a runtime list is as tall as the list needs; every other row is one row high. A list with
-    // nothing in it takes no room at all, which is how a page drops a choice the machine could not offer.
-    static constexpr auto LinesOfList = [] [[nodiscard]] (std::size_t count) noexcept -> std::size_t { return (count + kListPerLine - 1) / kListPerLine; };
+    // A switch is its own label, so its row is the control and the gap. A row holding a runtime list is as
+    // tall as the list needs, and a list with nothing in it takes no room at all, which is how a page drops
+    // a choice the machine could not offer.
+    static constexpr auto LinesOfList = [] [[nodiscard]] (std::size_t count) noexcept -> int { return static_cast<int>((count + kListPerLine - 1) / kListPerLine); };
 
-    static constexpr auto UnitsOfRow = [] [[nodiscard]] (const RowSpec& row, const PanelLists& lists) noexcept -> std::size_t {
-        if (row.kind != Kind::List)
-            return kUnitsPerRow;
-        return kUnitsPerRow * LinesOfList(lists[row.index].choices.Size());
+    static constexpr auto HeightOfList = [] [[nodiscard]] (std::size_t list, const Metrics& m) noexcept -> int {
+        const int lines = LinesOfList((*m.lists)[list].choices.Size());
+        if (lines == 0)
+            return 0;
+        return m.LabelHeight() + lines * m.ControlHeight() + m.RowGap();
     };
 
-    // A frame is as tall as the rows in it, and its caption above them and its edge below them.
-    static constexpr auto UnitsOfFrame = [] [[nodiscard]] (std::size_t frame, const PanelLists& lists) noexcept -> std::size_t {
-        const auto counted = [&lists](std::size_t so, const RowSpec& inner) { return so + UnitsOfRow(inner, lists); };
-        return std::ranges::fold_left(InnerRows(frame), 2 * kCaptionUnits, counted);
+    static constexpr auto HeightOfRow = [] [[nodiscard]] (const RowSpec& row, const Metrics& m) noexcept -> int {
+        if (row.kind == Kind::Toggle)
+            return m.ControlHeight() + m.RowGap();
+        if (row.kind == Kind::List)
+            return HeightOfList(row.index, m);
+        return m.RowHeight();
+    };
+
+    // A frame is as tall as the rows in it, with its caption above them, its edge below them and a gap of
+    // its own under that; a break has no height, only a column of its own.
+    static constexpr auto HeightOfFrame = [] [[nodiscard]] (std::size_t frame, const Metrics& m) noexcept -> int {
+        const auto counted = [&m](int so, const RowSpec& inner) { return so + HeightOfRow(inner, m); };
+        return std::ranges::fold_left(InnerRows(frame), m.CaptionHeight() + m.Of(kFrameBottom + kFrameGap), counted);
     };
     if (row.kind == Kind::Break)
         return 0;
     if (row.kind == Kind::Frame)
-        return UnitsOfFrame(row.index, lists);
-    return UnitsOfRow(row, lists);
+        return HeightOfFrame(row.index, m);
+    return HeightOfRow(row, m);
 }
 
 // Where the next row starts. A row never straddles a column, so one that will not fit in what is left of
@@ -404,12 +420,12 @@ struct Placement
 struct Cell
 {
     std::size_t column;
-    std::size_t slot;
+    int offset; // from the top of the page, in the display's dots
 };
 
-[[nodiscard]] Cell Fitted(const Cell& at, std::size_t units, std::size_t perColumn) noexcept
+[[nodiscard]] Cell Fitted(const Cell& at, int height, int column) noexcept
 {
-    if (at.slot + units <= perColumn)
+    if (at.offset + height <= column)
         return at;
     return Cell{ at.column + 1, 0 };
 }
@@ -421,14 +437,14 @@ struct Landing
     Cell next;
 };
 
-[[nodiscard]] Landing Landed(const Cell& so, const RowSpec& row, const PanelLists& lists, std::size_t perColumn) noexcept
+[[nodiscard]] Landing Landed(const Cell& so, const RowSpec& row, const Metrics& m) noexcept
 {
-    static constexpr auto Past = [] [[nodiscard]] (const Cell& at, std::size_t units) noexcept -> Cell { return Cell{ at.column, at.slot + units }; };
+    static constexpr auto Past = [] [[nodiscard]] (const Cell& at, int height) noexcept -> Cell { return Cell{ at.column, at.offset + height }; };
     if (row.kind == Kind::Break)
         return Landing{ Cell{ so.column + 1, 0 }, Cell{ so.column + 1, 0 } };
-    const std::size_t units = UnitsOf(row, lists);
-    const Cell at = Fitted(so, units, perColumn);
-    return Landing{ at, Past(at, units) };
+    const int height = HeightOf(row, m);
+    const Cell at = Fitted(so, height, m.column);
+    return Landing{ at, Past(at, height) };
 }
 
 // Walking a page: each row is put where the cursor stands, and the cursor moves on by the row's height.
@@ -438,10 +454,12 @@ struct Walk
     std::optional<Placement> found;
 };
 
-[[nodiscard]] Placement PlaceOfCell(const Cell& at, const Metrics& m) noexcept
+// A switch has no label of its own above it, so its control stands where a label would.
+[[nodiscard]] Placement PlaceOf(const RowSpec& row, const Cell& at, const Metrics& m) noexcept
 {
-    const int top = m.PageTop() + static_cast<int>(at.slot) * m.Unit();
-    return Placement{ kMargin + static_cast<int>(at.column) * (kColumnWidth + kMargin), top, top + m.LabelHeight(), kColumnWidth };
+    const int top = m.PageTop() + at.offset;
+    const int control = row.kind == Kind::Toggle ? top : top + m.LabelHeight();
+    return Placement{ kMargin + static_cast<int>(at.column) * (kColumnWidth + kMargin), top, control, kColumnWidth };
 }
 
 // The rows inside a frame stand in from its edges, so its lines run clear of them.
@@ -459,13 +477,13 @@ struct Walk
     // whole, so none of them can run out of column.
     static constexpr auto FoundInFrame = [] [[nodiscard]] (std::size_t frame, const Cell& top, Kind kind, std::size_t index, const Metrics& m) noexcept -> std::optional<Placement> {
         const auto step = [kind, index, &m](const Walk& so, const RowSpec& inner) {
-            const std::optional<Placement> found = IsWanted(inner, kind, index) ? std::optional<Placement>{ Inset(PlaceOfCell(so.at, m)) } : so.found;
-            return Walk{ Cell{ so.at.column, so.at.slot + UnitsOf(inner, *m.lists) }, found };
+            const std::optional<Placement> found = IsWanted(inner, kind, index) ? std::optional<Placement>{ Inset(PlaceOf(inner, so.at, m)) } : so.found;
+            return Walk{ Cell{ so.at.column, so.at.offset + HeightOf(inner, m) }, found };
         };
-        return std::ranges::fold_left(InnerRows(frame), Walk{ Cell{ top.column, top.slot + kCaptionUnits }, std::nullopt }, step).found;
+        return std::ranges::fold_left(InnerRows(frame), Walk{ Cell{ top.column, top.offset + m.CaptionHeight() }, std::nullopt }, step).found;
     };
     if (IsWanted(row, kind, index))
-        return PlaceOfCell(at, m);
+        return PlaceOf(row, at, m);
     if (row.kind == Kind::Frame)
         return FoundInFrame(row.index, at, kind, index, m);
     return std::nullopt;
@@ -473,7 +491,7 @@ struct Walk
 
 [[nodiscard]] Walk Stepped(const Walk& so, const RowSpec& row, Kind kind, std::size_t index, const Metrics& m) noexcept
 {
-    const Landing landed = Landed(so.at, row, *m.lists, static_cast<std::size_t>(m.units));
+    const Landing landed = Landed(so.at, row, m);
     return Walk{ landed.next, so.found.has_value() ? so.found : PlacedAt(row, landed.at, kind, index, m) };
 }
 
@@ -1433,28 +1451,33 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 return height;
             };
 
-            // The shortest column every page shown fits two of, in half rows. The panel is as tall as that and no
-            // taller, so pages left out cost nothing and a page losing rows makes the window shorter.
-            static constexpr auto UnitsPerColumn = [] [[nodiscard]] (const PanelLists& lists, bool showInert) noexcept -> int {
-                static constexpr auto FitsAt = [] [[nodiscard]] (const PanelLists& lists, bool showInert, std::size_t units) noexcept -> bool {
+            // The shortest column every page shown fits two of. The panel is as tall as that and no taller, so pages
+            // left out cost nothing and a page losing rows makes the window shorter.
+            static constexpr auto ColumnHeight = [] [[nodiscard]] (const Metrics& m, bool showInert) noexcept -> int {
+                // The rows are measured by the metrics alone; the column they are fitted to is the one being tried.
+                static constexpr auto Tried = [] [[nodiscard]] (const Metrics& m, int column) noexcept -> Metrics { return Metrics{ m.dpi, m.line, column, m.body, m.lists }; };
+
+                static constexpr auto FitsAt = [] [[nodiscard]] (const Metrics& m, bool showInert) noexcept -> bool {
                     // A row cannot straddle a column, and a break leaves the rest of one empty, so a page can need more room
-                    // than its units alone say. Rather than guess at that from a share of the units, the layout itself is
+                    // than its rows alone say. Rather than guess at that from a share of the rows, the layout itself is
                     // asked how many columns it takes.
-                    static constexpr auto ColumnsNeeded = [] [[nodiscard]] (Page page, const PanelLists& lists, std::size_t units) noexcept -> std::size_t {
-                        const auto step = [&lists, units](const Cell& at, const RowSpec& row) { return Landed(at, row, lists, units).next; };
+                    static constexpr auto ColumnsNeeded = [] [[nodiscard]] (Page page, const Metrics& m) noexcept -> std::size_t {
+                        const auto step = [&m](const Cell& at, const RowSpec& row) { return Landed(at, row, m).next; };
                         return std::ranges::fold_left(RowsOf(page), Cell{ 0, 0 }, step).column + 1;
                     };
                     const auto pages = std::views::iota(std::size_t{ 0 }, PagesShown(showInert));
-                    return std::ranges::all_of(pages, [&lists, units](std::size_t page) { return ColumnsNeeded(static_cast<Page>(page), lists, units) <= static_cast<std::size_t>(kColumns); });
+                    return std::ranges::all_of(pages, [&m](std::size_t page) { return ColumnsNeeded(static_cast<Page>(page), m) <= static_cast<std::size_t>(kColumns); });
                 };
-                constexpr int least = kMinRowsPerColumn * static_cast<int>(kUnitsPerRow);
-                constexpr int most = kMaxRowsPerColumn * static_cast<int>(kUnitsPerRow);
-                const auto depths = std::views::iota(least, most + 1);
-                const auto found = std::ranges::find_if(depths, [&lists, showInert](int units) { return FitsAt(lists, showInert, static_cast<std::size_t>(units)); });
-                return found == depths.end() ? most : *found;
+                const int least = kMinRowsPerColumn * m.RowHeight();
+                const int most = kMaxRowsPerColumn * m.RowHeight();
+                const auto heights = std::views::iota(least, most + 1);
+                const auto found = std::ranges::find_if(heights, [&m, showInert](int column) { return FitsAt(Tried(m, column), showInert); });
+                return found == heights.end() ? most : *found;
             };
             const int dpi = static_cast<int>(::GetDpiForWindow(window));
-            return Metrics{ dpi, LineHeight(window, font), UnitsPerColumn(lists, showInert), BodyHeightOf(window, font, dpi), &lists };
+            // Measured with no column at all, which is what the rows are measured by before the column is chosen.
+            const Metrics unfitted{ dpi, LineHeight(window, font), 0, BodyHeightOf(window, font, dpi), &lists };
+            return Metrics{ dpi, unfitted.line, ColumnHeight(unfitted, showInert), unfitted.body, &lists };
         };
 
         static constexpr auto ResizeToFit = [](HWND window, const Metrics& m) noexcept -> void {
@@ -1774,7 +1797,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 static constexpr auto BuildFrames = [] [[nodiscard]] (HWND parent, const Metrics& m, Built built) noexcept -> Built {
                     static constexpr auto CreateFrame = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t f) noexcept -> HWND {
                         const Placement at = PlaceOfRow(Kind::Frame, f, m);
-                        const int height = static_cast<int>(UnitsOf(Of(static_cast<Frame>(f)), *m.lists)) * m.Unit() - m.Of(kFrameGap);
+                        const int height = HeightOf(Of(static_cast<Frame>(f)), m) - m.Of(kFrameGap);
                         return CreateChild(parent, WC_BUTTONW, kFrames[f].caption, BS_GROUPBOX, 0, Bounds(m, at.left, at.top, at.width, height));
                     };
                     built.frames = infra::Generated<HWND, kFrameCount>([&](std::size_t f) { return CreateFrame(parent, m, f); });
