@@ -38,7 +38,7 @@ The control panel says the same thing at the foot of its window.
 
 ## Working on one window
 
-On the panel's View page, drag the crosshair onto a window to work on that one window instead of a
+On the panel's Model page, drag the crosshair onto a window to work on that one window instead of a
 monitor. The title under the pointer is shown beside it as you drag; letting go over the desktop goes back
 to capturing a monitor. From the command line, `--window` takes either part of a window's title, ignoring
 case, or a window handle as `0x...` — which is what the panel writes when it starts a new session.
@@ -109,11 +109,12 @@ cmake -S . -B build-linux -G Ninja && cmake --build build-linux && ctest --test-
 
 Double-clicking the executable opens the control panel and the overlay, with no console window. Every
 command line option except `--help`, `--list-monitors`, `--gui` and the NGX runtime settings has a control
-on the panel, on one of three pages: **Model** for what the model reads, **View** for the window and the
-capture, and **Advanced** for the rest. A number is a slider to sweep it, a box to type an exact value and
-arrows to step it, with a reset beside each; a choice is a row of buttons; a path is a box to type in.
-Every row is measured from the height of the display's own text, so nothing crowds or clips whatever the
-scaling, and the window is only as tall as the deepest page it is showing.
+on the panel, on one of three pages: **Model** for what the model reads, what its work is compared
+against and which window it is given, **View** for the capture and the window it is shown in, and
+**Advanced** for the rest. A number is a slider to sweep it, a box to type an exact value and arrows to
+step it, with a reset beside each; a choice is a row of buttons; a path is a box to type in. Rows that
+belong together share a frame. Every row is measured from the height of the display's own text, so nothing
+crowds or clips whatever the scaling, and the window is only as tall as the deepest page it is showing.
 
 Moving anything on the first two pages takes effect at once. Changing the tuning rebuilds the model's
 feature, because the model reads it while the feature is built rather than on each frame, and the frame is

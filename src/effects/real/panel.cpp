@@ -66,6 +66,12 @@ constexpr int kExpanderWidth = 28;
 
 constexpr int kMinRowsPerColumn = 7;
 constexpr int kMaxRowsPerColumn = 16;
+// Vertical room is counted in half rows: a row is two of them, and a frame's caption above its first row
+// and its bottom edge below its last take one each, so a frame costs one row more than what it holds.
+constexpr std::size_t kUnitsPerRow = 2;
+constexpr std::size_t kCaptionUnits = 1;
+constexpr int kFrameInset = 10; // how far the rows inside a frame stand in from its edge, on either side
+constexpr int kFrameGap = 14;   // the room between a frame's bottom edge and whatever stands under it
 
 // Each slider counts in steps of a unit: 1 counts whole numbers, 100 counts hundredths. A range says how
 // far a slider reaches, not what the model accepts; the command line still takes any finite value.
@@ -157,7 +163,7 @@ constexpr wchar_t kNoSuperResolution[] = L"Not offered.\n"
                                          L"The rest of the session runs without it.";
 
 constexpr std::array<GroupSpec, kGroupCount> kGroups{ {
-    { L"Compare", L"What the window shows: the model's work, both either side of a divider, or the picture as captured.", 3, { L"Processed", L"Split", L"Original" }, nullptr },
+    { L"Show", L"What the window shows: the model's work, both either side of a divider, or the picture as captured.", 3, { L"Processed", L"Split", L"Original" }, nullptr },
     { L"Style", L"Which of the model's three looks to ask for. The model clamps anything else.", 3, { L"Standard", L"Natural", L"Cinematic" }, nullptr },
     { L"Cursor", L"Whether the captured picture includes the mouse pointer. Auto keeps the session's own choice.", 3, { L"Auto", L"On", L"Off" }, nullptr },
     { L"Motion vectors",
@@ -200,7 +206,9 @@ constexpr std::array<PickSpec, kPickCount> kPicks{ {
 
 // --- what sits on which page, and in what order -------------------------------------------------------
 
-enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List };
+// A frame is a group box around the rows it names. A break ends a column early, so a page can say which
+// rows stand on the right rather than leaving that to how many happen to fit on the left.
+enum class Kind : std::uint8_t { Field, Toggle, Group, Pick, List, Frame, Break };
 
 struct RowSpec
 {
@@ -228,6 +236,29 @@ struct RowSpec
 {
     return RowSpec{ Kind::List, static_cast<std::size_t>(l) };
 }
+[[nodiscard]] constexpr RowSpec Of(Frame f) noexcept
+{
+    return RowSpec{ Kind::Frame, static_cast<std::size_t>(f) };
+}
+
+constexpr RowSpec kNextColumn{ Kind::Break, 0 };
+
+constexpr std::size_t kMaxFrameRows = 4;
+
+struct FrameSpec
+{
+    const wchar_t* caption;
+    std::size_t count;
+    std::array<RowSpec, kMaxFrameRows> rows;
+};
+
+// Style changes nothing while local tone is zero, so the two share a frame; the skin controls share one
+// because each of the three decides what the others mean; and the comparison is a view, not a setting.
+constexpr std::array<FrameSpec, kFrameCount> kFrames{ {
+    { L"Tone", 2, { Of(Field::LocalTone), Of(Group::Style) } },
+    { L"Skin", 3, { Of(Toggle::AutoMask), Of(Toggle::SkinFollowsStructure), Of(Field::Skin) } },
+    { L"Compare", 2, { Of(Group::Compare), Of(Field::Split) } },
+} };
 
 constexpr std::size_t kMaxRows = kColumns * kMaxRowsPerColumn;
 
@@ -238,32 +269,67 @@ struct PageSpec
     std::array<RowSpec, kMaxRows> rows;
 };
 
-// The Inert page holds what a desktop gives the model no way to answer to: the depth plane is one constant,
-// UI correction reads a layer nothing binds, and optical flow drives a backend this build leaves out.
+// The Model page is two columns by design: the tuning down the left, and on the right how many times the
+// model runs, what its work is compared against and which window it is given. The Inert page holds what
+// a desktop gives the model no way to answer to: the depth plane is one constant, UI correction reads a
+// layer nothing binds, and optical flow drives a backend this build leaves out.
 constexpr std::array<PageSpec, static_cast<std::size_t>(Page::Count)> kPages{ {
     { L"Model",
-      13,
-      { Of(Toggle::NeuralRendering), Of(Group::Style), Of(List::Preset), Of(Field::Intensity), Of(Field::LocalStructure), Of(Field::LocalTone), Of(Toggle::SkinFollowsStructure), Of(Field::Skin),
-        Of(Toggle::AutoMask), Of(Field::ResetThreshold), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::Passes) } },
-    { L"View",
       10,
-      { Of(Pick::Window), Of(List::Source), Of(List::Target), Of(Group::Compare), Of(Field::Split), Of(Toggle::Vsync), Of(Group::Cursor), Of(Toggle::CaptureBorder), Of(Toggle::Topmost),
-        Of(Group::LogLevel) } },
+      { Of(Toggle::NeuralRendering), Of(List::Preset), Of(Field::Intensity), Of(Field::LocalStructure), Of(Frame::Tone), Of(Frame::Skin), kNextColumn, Of(Field::Passes), Of(Frame::Compare),
+        Of(Pick::Window) } },
+    { L"View", 7, { Of(List::Source), Of(List::Target), Of(Toggle::Vsync), Of(Group::Cursor), Of(Toggle::CaptureBorder), Of(Toggle::Topmost), Of(Group::LogLevel) } },
     { L"Advanced",
-      10,
-      { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(List::Adapter), Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator),
-        Of(Toggle::CubinCache) } },
+      13,
+      { Of(Group::Format), Of(Group::Sr), Of(Field::SrPreset), Of(Group::Motion), Of(Field::MvLevel), Of(Field::MvScaleX), Of(Field::MvScaleY), Of(Field::ResetThreshold), Of(List::Adapter),
+        Of(Toggle::RedirectionBitmap), Of(Toggle::DebugLayer), Of(Toggle::Indicator), Of(Toggle::CubinCache) } },
     { L"Inert", 5, { Of(Field::DepthValue), Of(Toggle::DepthInverted), Of(Toggle::UiCorrection), Of(Group::NvofGrid), Of(Group::NvofPerf) } },
 } };
 
-// Every control belongs to exactly one page. One left off would be placed nowhere and stop the program as
-// it starts, so the tables are counted here instead of trusted.
+[[nodiscard]] constexpr std::span<const RowSpec> RowsOf(const PageSpec& page) noexcept
+{
+    return std::span<const RowSpec>(page.rows.data(), page.count);
+}
+
+[[nodiscard]] constexpr std::span<const RowSpec> RowsOf(const FrameSpec& frame) noexcept
+{
+    return std::span<const RowSpec>(frame.rows.data(), frame.count);
+}
+
+[[nodiscard]] constexpr std::span<const RowSpec> RowsOf(Page page) noexcept
+{
+    return RowsOf(kPages[static_cast<std::size_t>(page)]);
+}
+
+// The rows a frame surrounds, which stand on its page inside it rather than in the page's own list.
+[[nodiscard]] constexpr std::span<const RowSpec> InnerRows(std::size_t frame) noexcept
+{
+    return RowsOf(kFrames[frame]);
+}
+
+// Every control belongs to exactly one page, on it or in a frame on it. One left off would be placed
+// nowhere and stop the program as it starts, so the tables are counted here instead of trusted.
+[[nodiscard]] constexpr std::size_t CountOfKind(std::span<const RowSpec> rows, Kind kind) noexcept
+{
+    return static_cast<std::size_t>(std::ranges::count_if(rows, [kind](const RowSpec& r) { return r.kind == kind; }));
+}
+
 [[nodiscard]] constexpr std::size_t RowsOfKind(Kind kind) noexcept
 {
-    std::size_t total = 0; // WAIVER(R2): a count folded while compiling, not state the program keeps.
-    for (const PageSpec& page : kPages)
-        total += static_cast<std::size_t>(std::ranges::count_if(std::span<const RowSpec>(page.rows.data(), page.count), [kind](const RowSpec& r) { return r.kind == kind; }));
-    return total;
+    const auto onPage = [kind](std::size_t so, const PageSpec& page) { return so + CountOfKind(RowsOf(page), kind); };
+    const auto inFrame = [kind](std::size_t so, const FrameSpec& frame) { return so + CountOfKind(RowsOf(frame), kind); };
+    return std::ranges::fold_left(kFrames, std::ranges::fold_left(kPages, std::size_t{ 0 }, onPage), inFrame);
+}
+
+// A frame holds rows, not frames or breaks; and a page with two columns breaks at most once.
+[[nodiscard]] constexpr bool FramesAreFlat() noexcept
+{
+    return std::ranges::all_of(kFrames, [](const FrameSpec& frame) { return CountOfKind(RowsOf(frame), Kind::Frame) == 0 && CountOfKind(RowsOf(frame), Kind::Break) == 0; });
+}
+
+[[nodiscard]] constexpr bool PagesBreakOnce() noexcept
+{
+    return std::ranges::all_of(kPages, [](const PageSpec& page) { return CountOfKind(RowsOf(page), Kind::Break) < static_cast<std::size_t>(kColumns); });
 }
 
 static_assert(RowsOfKind(Kind::Field) == kFieldCount);
@@ -271,12 +337,9 @@ static_assert(RowsOfKind(Kind::Toggle) == kToggleCount);
 static_assert(RowsOfKind(Kind::Group) == kGroupCount);
 static_assert(RowsOfKind(Kind::Pick) == kPickCount);
 static_assert(RowsOfKind(Kind::List) == kListCount);
-
-[[nodiscard]] std::span<const RowSpec> RowsOf(Page page) noexcept
-{
-    const PageSpec& spec = kPages[static_cast<std::size_t>(page)];
-    return std::span<const RowSpec>(spec.rows.data(), spec.count);
-}
+static_assert(RowsOfKind(Kind::Frame) == kFrameCount);
+static_assert(FramesAreFlat());
+static_assert(PagesBreakOnce());
 
 // --- measurement ---------------------------------------------------------------------------------------
 
@@ -286,17 +349,18 @@ struct Metrics
 {
     int dpi;
     int line;
-    int rows;                // slots to a column, taken from whichever page needs the most
+    int units;               // half rows to a column, taken from whichever page needs the most
     int body;                // how tall the notice's own text is, measured in the font it is drawn in
     const PanelLists* lists; // borrowed for as long as the panel is being built, which is the only time it is read
     [[nodiscard]] int Of(int reference) const noexcept { return ::MulDiv(reference, dpi, kReferenceDpi); }
     [[nodiscard]] int LabelHeight() const noexcept { return line + Of(5); }
     [[nodiscard]] int ControlHeight() const noexcept { return std::max(Of(22), line + Of(9)); }
-    [[nodiscard]] int RowHeight() const noexcept { return LabelHeight() + ControlHeight() + Of(10); }
+    // A row is a label, a control and a gap under them; half of that is the unit the columns are counted in.
+    [[nodiscard]] int Unit() const noexcept { return (LabelHeight() + ControlHeight() + Of(10) + 1) / 2; }
     [[nodiscard]] int PageTop() const noexcept { return Of(kMargin + kTabHeight); }
     // The rows, then the notice under them, then the margin.
-    [[nodiscard]] int PageHeight() const noexcept { return rows * RowHeight() + ControlHeight() + Of(2 * kMargin); }
-    [[nodiscard]] int NoticeTop() const noexcept { return PageTop() + rows * RowHeight() + Of(kMargin); }
+    [[nodiscard]] int PageHeight() const noexcept { return units * Unit() + ControlHeight() + Of(2 * kMargin); }
+    [[nodiscard]] int NoticeTop() const noexcept { return PageTop() + units * Unit() + Of(kMargin); }
     [[nodiscard]] int BodyHeight() const noexcept { return body + Of(kMargin); }
 };
 
@@ -305,16 +369,31 @@ struct Placement
     int left; // in reference pixels
     int top;  // in the display's dots
     int control;
+    int width; // in reference pixels: the column, or what is left of it inside a frame
 };
 
-[[nodiscard]] std::size_t SlotsOf(const RowSpec& row, const PanelLists& lists) noexcept
+[[nodiscard]] std::size_t UnitsOf(const RowSpec& row, const PanelLists& lists) noexcept
 {
-    // A row holding a runtime list is as tall as the list needs; every other row is one slot high. A list with
+    // A row holding a runtime list is as tall as the list needs; every other row is one row high. A list with
     // nothing in it takes no room at all, which is how a page drops a choice the machine could not offer.
     static constexpr auto LinesOfList = [] [[nodiscard]] (std::size_t count) noexcept -> std::size_t { return (count + kListPerLine - 1) / kListPerLine; };
-    if (row.kind != Kind::List)
-        return 1;
-    return LinesOfList(lists[row.index].choices.Size());
+
+    static constexpr auto UnitsOfRow = [] [[nodiscard]] (const RowSpec& row, const PanelLists& lists) noexcept -> std::size_t {
+        if (row.kind != Kind::List)
+            return kUnitsPerRow;
+        return kUnitsPerRow * LinesOfList(lists[row.index].choices.Size());
+    };
+
+    // A frame is as tall as the rows in it, and its caption above them and its edge below them.
+    static constexpr auto UnitsOfFrame = [] [[nodiscard]] (std::size_t frame, const PanelLists& lists) noexcept -> std::size_t {
+        const auto counted = [&lists](std::size_t so, const RowSpec& inner) { return so + UnitsOfRow(inner, lists); };
+        return std::ranges::fold_left(InnerRows(frame), 2 * kCaptionUnits, counted);
+    };
+    if (row.kind == Kind::Break)
+        return 0;
+    if (row.kind == Kind::Frame)
+        return UnitsOfFrame(row.index, lists);
+    return UnitsOfRow(row, lists);
 }
 
 // Where the next row starts. A row never straddles a column, so one that will not fit in what is left of
@@ -325,11 +404,74 @@ struct Cell
     std::size_t slot;
 };
 
-[[nodiscard]] Cell Fitted(const Cell& at, std::size_t slots, std::size_t rows) noexcept
+[[nodiscard]] Cell Fitted(const Cell& at, std::size_t units, std::size_t perColumn) noexcept
 {
-    if (at.slot + slots <= rows)
+    if (at.slot + units <= perColumn)
         return at;
     return Cell{ at.column + 1, 0 };
+}
+
+// Where a row lands, and where the row after it starts. A break lands nowhere and starts the next column.
+struct Landing
+{
+    Cell at;
+    Cell next;
+};
+
+[[nodiscard]] Landing Landed(const Cell& so, const RowSpec& row, const PanelLists& lists, std::size_t perColumn) noexcept
+{
+    static constexpr auto Past = [] [[nodiscard]] (const Cell& at, std::size_t units) noexcept -> Cell { return Cell{ at.column, at.slot + units }; };
+    if (row.kind == Kind::Break)
+        return Landing{ Cell{ so.column + 1, 0 }, Cell{ so.column + 1, 0 } };
+    const std::size_t units = UnitsOf(row, lists);
+    const Cell at = Fitted(so, units, perColumn);
+    return Landing{ at, Past(at, units) };
+}
+
+// Walking a page: each row is put where the cursor stands, and the cursor moves on by the row's height.
+struct Walk
+{
+    Cell at;
+    std::optional<Placement> found;
+};
+
+[[nodiscard]] Placement PlaceOfCell(const Cell& at, const Metrics& m) noexcept
+{
+    const int top = m.PageTop() + static_cast<int>(at.slot) * m.Unit();
+    return Placement{ kMargin + static_cast<int>(at.column) * (kColumnWidth + kMargin), top, top + m.LabelHeight(), kColumnWidth };
+}
+
+// The rows inside a frame stand in from its edges, so its lines run clear of them.
+[[nodiscard]] Placement Inset(const Placement& at) noexcept
+{
+    return Placement{ at.left + kFrameInset, at.top, at.control, at.width - 2 * kFrameInset };
+}
+
+// Where the row asked for stands, if it is this row or is inside this frame.
+[[nodiscard]] std::optional<Placement> PlacedAt(const RowSpec& row, const Cell& at, Kind kind, std::size_t index, const Metrics& m) noexcept
+{
+    static constexpr auto IsWanted = [] [[nodiscard]] (const RowSpec& row, Kind kind, std::size_t index) noexcept -> bool { return row.kind == kind && row.index == index; };
+
+    // The rows inside a frame start under its caption, each right under the one before: the frame was fitted
+    // whole, so none of them can run out of column.
+    static constexpr auto FoundInFrame = [] [[nodiscard]] (std::size_t frame, const Cell& top, Kind kind, std::size_t index, const Metrics& m) noexcept -> std::optional<Placement> {
+        const auto step = [kind, index, &m](const Walk& so, const RowSpec& inner) {
+            const std::optional<Placement> found = IsWanted(inner, kind, index) ? std::optional<Placement>{ Inset(PlaceOfCell(so.at, m)) } : so.found;
+            return Walk{ Cell{ so.at.column, so.at.slot + UnitsOf(inner, *m.lists) }, found };
+        };
+        return std::ranges::fold_left(InnerRows(frame), Walk{ Cell{ top.column, top.slot + kCaptionUnits }, std::nullopt }, step).found;
+    };
+    if (IsWanted(row, kind, index))
+        return PlaceOfCell(at, m);
+    if (row.kind == Kind::Frame)
+        return FoundInFrame(row.index, at, kind, index, m);
+    return std::nullopt;
+}
+
+[[nodiscard]] Walk Stepped(const Walk& so, const RowSpec& row, Kind kind, std::size_t index, const Metrics& m) noexcept
+{
+    const Landing landed = Landed(so.at, row, *m.lists, static_cast<std::size_t>(m.units));
+    return Walk{ landed.next, so.found.has_value() ? so.found : PlacedAt(row, landed.at, kind, index, m) };
 }
 
 // --- the window and its furniture ------------------------------------------------------------------------
@@ -686,28 +828,8 @@ struct Built
     std::array<HWND, kPickCount> pickResets;
     std::array<HWND, kListCount> listLabels;
     std::array<std::array<HWND, kMaxListChoices>, kListCount> listChoices;
+    std::array<HWND, kFrameCount> frames;
 };
-
-// Walking a page: each row is put where the cursor stands, and the cursor moves on by the row's height.
-struct Walk
-{
-    Cell at;
-    std::optional<Placement> found;
-};
-
-[[nodiscard]] Walk Stepped(const Walk& so, const RowSpec& row, Kind kind, std::size_t index, const Metrics& m) noexcept
-{
-    static constexpr auto PlaceOfCell = [] [[nodiscard]] (const Cell& at, const Metrics& m) noexcept -> Placement {
-        const int top = m.PageTop() + static_cast<int>(at.slot) * m.RowHeight();
-        return Placement{ kMargin + static_cast<int>(at.column) * (kColumnWidth + kMargin), top, top + m.LabelHeight() };
-    };
-
-    static constexpr auto IsWanted = [] [[nodiscard]] (const RowSpec& row, Kind kind, std::size_t index) noexcept -> bool { return row.kind == kind && row.index == index; };
-    const std::size_t slots = SlotsOf(row, *m.lists);
-    const Cell at = Fitted(so.at, slots, static_cast<std::size_t>(m.rows));
-    const std::optional<Placement> found = IsWanted(row, kind, index) ? std::optional<Placement>{ PlaceOfCell(at, m) } : so.found;
-    return Walk{ Cell{ at.column, at.slot + slots }, found };
-}
 
 [[nodiscard]] LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) noexcept;
 
@@ -906,59 +1028,73 @@ LRESULT CALLBACK HighlightProc(HWND window, UINT message, WPARAM w, LPARAM l) no
 void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
 {
     static constexpr auto ShowPage = [](const ControlPanel& panel, Page page, bool visible) noexcept -> void {
-        static constexpr auto ShowRow = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
-            static constexpr auto ShowAll = [](std::span<const HWND> controls, int how) noexcept -> void {
-                std::ranges::for_each(controls, [how](HWND control) { (void)::ShowWindow(control, how); });
-            };
-
-            static constexpr auto ShowNumberOrSwitch = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 2> {
-                    return { panel.toggles[t], panel.toggleResets[t] };
-                };
-                if (row.kind == Kind::Field)
-                    ShowAll(ControlsOfField(panel, row.index), how);
-                else
-                    ShowAll(ControlsOfToggle(panel, row.index), how);
-            };
-
-            // A number and a switch each stand on a row of their own; a group and a box are laid out differently.
-            static constexpr auto StandsAlone = [] [[nodiscard]] (Kind kind) noexcept -> bool { return kind == Kind::Field || kind == Kind::Toggle; };
-
-            static constexpr auto ShowChoicesOrText = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                static constexpr auto ShowList = [](const ControlPanel& panel, std::size_t list, int how) noexcept -> void {
-                    (void)::ShowWindow(panel.listLabels[list], how);
-                    ShowAll(ChoicesOfList(panel, static_cast<List>(list)), how);
+        // A frame is shown with the rows inside it; a break has nothing to show.
+        static constexpr auto ShowRowOrFrame = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
+            static constexpr auto ShowRow = [](const ControlPanel& panel, const RowSpec& row, bool visible) noexcept -> void {
+                static constexpr auto ShowAll = [](std::span<const HWND> controls, int how) noexcept -> void {
+                    std::ranges::for_each(controls, [how](HWND control) { (void)::ShowWindow(control, how); });
                 };
 
-                static constexpr auto ShowGroupOrText = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                    static constexpr auto ControlsOfPick = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 4> {
-                        return { panel.pickLabels[t], panel.crosshairs[t], panel.pickNames[t], panel.pickResets[t] };
+                static constexpr auto ShowNumberOrSwitch = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
+                    static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 2> {
+                        return { panel.toggles[t], panel.toggleResets[t] };
                     };
-
-                    static constexpr auto ShowGroup = [](const ControlPanel& panel, std::size_t group, int how) noexcept -> void {
-                        // The only group that carries a warning is super resolution, and what it warns of is the model being
-                        // absent, which the session settled before the panel was built.
-                        static constexpr auto WarningHow = [] [[nodiscard]] (const ControlPanel& panel, int how) noexcept -> int { return HowOf(how == SW_SHOW && !panel.superResolution); };
-                        (void)::ShowWindow(panel.groupLabels[group], how);
-                        (void)::ShowWindow(panel.groupWarnings[group], WarningHow(panel, how));
-                        ShowAll(ChoicesOf(panel, static_cast<Group>(group)), how);
-                    };
-                    if (row.kind == Kind::Group)
-                        ShowGroup(panel, row.index, how);
+                    if (row.kind == Kind::Field)
+                        ShowAll(ControlsOfField(panel, row.index), how);
                     else
-                        ShowAll(ControlsOfPick(panel, row.index), how);
+                        ShowAll(ControlsOfToggle(panel, row.index), how);
                 };
-                if (row.kind == Kind::List)
-                    ShowList(panel, row.index, how);
+
+                // A number and a switch each stand on a row of their own; a group and a box are laid out differently.
+                static constexpr auto StandsAlone = [] [[nodiscard]] (Kind kind) noexcept -> bool { return kind == Kind::Field || kind == Kind::Toggle; };
+
+                static constexpr auto ShowChoicesOrText = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
+                    static constexpr auto ShowList = [](const ControlPanel& panel, std::size_t list, int how) noexcept -> void {
+                        (void)::ShowWindow(panel.listLabels[list], how);
+                        ShowAll(ChoicesOfList(panel, static_cast<List>(list)), how);
+                    };
+
+                    static constexpr auto ShowGroupOrText = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
+                        static constexpr auto ControlsOfPick = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 4> {
+                            return { panel.pickLabels[t], panel.crosshairs[t], panel.pickNames[t], panel.pickResets[t] };
+                        };
+
+                        static constexpr auto ShowGroup = [](const ControlPanel& panel, std::size_t group, int how) noexcept -> void {
+                            // The only group that carries a warning is super resolution, and what it warns of is the model being
+                            // absent, which the session settled before the panel was built.
+                            static constexpr auto WarningHow = [] [[nodiscard]] (const ControlPanel& panel, int how) noexcept -> int { return HowOf(how == SW_SHOW && !panel.superResolution); };
+                            (void)::ShowWindow(panel.groupLabels[group], how);
+                            (void)::ShowWindow(panel.groupWarnings[group], WarningHow(panel, how));
+                            ShowAll(ChoicesOf(panel, static_cast<Group>(group)), how);
+                        };
+                        if (row.kind == Kind::Group)
+                            ShowGroup(panel, row.index, how);
+                        else
+                            ShowAll(ControlsOfPick(panel, row.index), how);
+                    };
+                    if (row.kind == Kind::List)
+                        ShowList(panel, row.index, how);
+                    else
+                        ShowGroupOrText(panel, row, how);
+                };
+                if (StandsAlone(row.kind))
+                    ShowNumberOrSwitch(panel, row, HowOf(visible));
                 else
-                    ShowGroupOrText(panel, row, how);
+                    ShowChoicesOrText(panel, row, HowOf(visible));
             };
-            if (StandsAlone(row.kind))
-                ShowNumberOrSwitch(panel, row, HowOf(visible));
+
+            static constexpr auto ShowFrame = [](const ControlPanel& panel, std::size_t frame, bool visible) noexcept -> void {
+                (void)::ShowWindow(panel.frames[frame], HowOf(visible));
+                std::ranges::for_each(InnerRows(frame), [&panel, visible](const RowSpec& inner) { ShowRow(panel, inner, visible); });
+            };
+            if (row.kind == Kind::Break)
+                return;
+            if (row.kind == Kind::Frame)
+                ShowFrame(panel, row.index, visible);
             else
-                ShowChoicesOrText(panel, row, HowOf(visible));
+                ShowRow(panel, row, visible);
         };
-        std::ranges::for_each(RowsOf(page), [&panel, visible](const RowSpec& row) { ShowRow(panel, row, visible); });
+        std::ranges::for_each(RowsOf(page), [&panel, visible](const RowSpec& row) { ShowRowOrFrame(panel, row, visible); });
     };
     std::ranges::for_each(std::views::iota(std::size_t{ 0 }, static_cast<std::size_t>(Page::Count)),
                           [&panel, chosen](std::size_t p) { ShowPage(panel, static_cast<Page>(p), static_cast<Page>(p) == chosen); });
@@ -1294,26 +1430,28 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                 return height;
             };
 
-            // The shortest column every page shown fits two of. The panel is as tall as that and no taller, so pages
-            // left out cost nothing and a page losing rows makes the window shorter.
-            static constexpr auto RowsPerColumn = [] [[nodiscard]] (const PanelLists& lists, bool showInert) noexcept -> int {
-                static constexpr auto FitsAt = [] [[nodiscard]] (const PanelLists& lists, bool showInert, std::size_t rows) noexcept -> bool {
-                    // A row cannot straddle a column, so a page can need more room than its slots alone say. Rather than guess
-                    // at that from a share of the slots, the layout itself is asked how many columns it takes.
-                    static constexpr auto ColumnsNeeded = [] [[nodiscard]] (Page page, const PanelLists& lists, std::size_t rows) noexcept -> std::size_t {
-                        static constexpr auto Past = [] [[nodiscard]] (const Cell& at, std::size_t slots) noexcept -> Cell { return Cell{ at.column, at.slot + slots }; };
-                        const auto step = [&lists, rows](const Cell& at, const RowSpec& row) { return Past(Fitted(at, SlotsOf(row, lists), rows), SlotsOf(row, lists)); };
+            // The shortest column every page shown fits two of, in half rows. The panel is as tall as that and no
+            // taller, so pages left out cost nothing and a page losing rows makes the window shorter.
+            static constexpr auto UnitsPerColumn = [] [[nodiscard]] (const PanelLists& lists, bool showInert) noexcept -> int {
+                static constexpr auto FitsAt = [] [[nodiscard]] (const PanelLists& lists, bool showInert, std::size_t units) noexcept -> bool {
+                    // A row cannot straddle a column, and a break leaves the rest of one empty, so a page can need more room
+                    // than its units alone say. Rather than guess at that from a share of the units, the layout itself is
+                    // asked how many columns it takes.
+                    static constexpr auto ColumnsNeeded = [] [[nodiscard]] (Page page, const PanelLists& lists, std::size_t units) noexcept -> std::size_t {
+                        const auto step = [&lists, units](const Cell& at, const RowSpec& row) { return Landed(at, row, lists, units).next; };
                         return std::ranges::fold_left(RowsOf(page), Cell{ 0, 0 }, step).column + 1;
                     };
                     const auto pages = std::views::iota(std::size_t{ 0 }, PagesShown(showInert));
-                    return std::ranges::all_of(pages, [&lists, rows](std::size_t page) { return ColumnsNeeded(static_cast<Page>(page), lists, rows) <= static_cast<std::size_t>(kColumns); });
+                    return std::ranges::all_of(pages, [&lists, units](std::size_t page) { return ColumnsNeeded(static_cast<Page>(page), lists, units) <= static_cast<std::size_t>(kColumns); });
                 };
-                const auto depths = std::views::iota(kMinRowsPerColumn, kMaxRowsPerColumn + 1);
-                const auto found = std::ranges::find_if(depths, [&lists, showInert](int rows) { return FitsAt(lists, showInert, static_cast<std::size_t>(rows)); });
-                return found == depths.end() ? kMaxRowsPerColumn : *found;
+                constexpr int least = kMinRowsPerColumn * static_cast<int>(kUnitsPerRow);
+                constexpr int most = kMaxRowsPerColumn * static_cast<int>(kUnitsPerRow);
+                const auto depths = std::views::iota(least, most + 1);
+                const auto found = std::ranges::find_if(depths, [&lists, showInert](int units) { return FitsAt(lists, showInert, static_cast<std::size_t>(units)); });
+                return found == depths.end() ? most : *found;
             };
             const int dpi = static_cast<int>(::GetDpiForWindow(window));
-            return Metrics{ dpi, LineHeight(window, font), RowsPerColumn(lists, showInert), BodyHeightOf(window, font, dpi), &lists };
+            return Metrics{ dpi, LineHeight(window, font), UnitsPerColumn(lists, showInert), BodyHeightOf(window, font, dpi), &lists };
         };
 
         static constexpr auto ResizeToFit = [](HWND window, const Metrics& m) noexcept -> void {
@@ -1455,8 +1593,10 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         return ArrangedSpin(spin, box, spec, steps);
                     };
                     const auto steps = [&values](std::size_t f) { return StepsOf(values[f], kFields[f]); };
-                    built.labels = infra::Generated<HWND, kFieldCount>(
-                        [&](std::size_t f) { return CreateLabel(parent, m, kFields[f].label, PlaceOfRow(Kind::Field, f, m).left, PlaceOfRow(Kind::Field, f, m).top, kColumnWidth); });
+                    built.labels = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
+                        const Placement at = PlaceOfRow(Kind::Field, f, m);
+                        return CreateLabel(parent, m, kFields[f].label, at.left, at.top, at.width);
+                    });
                     built.sliders = infra::Generated<HWND, kFieldCount>([&](std::size_t f) { return CreateSlider(parent, m, kFields[f], PlaceOfRow(Kind::Field, f, m), steps(f)); });
                     built.boxes = infra::Generated<HWND, kFieldCount>([&](std::size_t f) {
                         const Placement at = PlaceOfRow(Kind::Field, f, m);
@@ -1523,7 +1663,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     };
                     built.groupLabels = infra::Generated<HWND, kGroupCount>([&](std::size_t g) {
                         const Placement at = PlaceOfRow(Kind::Group, g, m);
-                        return CreateLabel(parent, m, kGroups[g].label, at.left + GroupInset(g), at.top, kColumnWidth - GroupInset(g));
+                        return CreateLabel(parent, m, kGroups[g].label, at.left + GroupInset(g), at.top, at.width - GroupInset(g));
                     });
                     built.groupWarnings = infra::Generated<HWND, kGroupCount>([&](std::size_t g) { return CreateGroupWarning(parent, m, g); });
                     built.choices = infra::Generated<std::array<HWND, kMaxChoices>, kGroupCount>([&](std::size_t g) { return CreateChoices(parent, m, g, chosen[g]); });
@@ -1545,7 +1685,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                             static constexpr auto PlaceOfChoice = [] [[nodiscard]] (const Placement& row, std::size_t index, const Metrics& m) noexcept -> Placement {
                                 const int line = static_cast<int>(index / kListPerLine);
                                 const int across = static_cast<int>(index % kListPerLine);
-                                return Placement{ row.left + across * kListChoiceWidth, row.top, row.control + line * m.ControlHeight() };
+                                return Placement{ row.left + across * kListChoiceWidth, row.top, row.control + line * m.ControlHeight(), row.width };
                             };
                             const PanelList& entries = (*m.lists)[list];
                             const Placement at = PlaceOfChoice(PlaceOfRow(Kind::List, list, m), index, m);
@@ -1561,7 +1701,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         if ((*m.lists)[list].choices.IsEmpty())
                             return nullptr;
                         const Placement at = PlaceOfRow(Kind::List, list, m);
-                        return CreateLabel(parent, m, kLists[list].label, at.left, at.top, kColumnWidth);
+                        return CreateLabel(parent, m, kLists[list].label, at.left, at.top, at.width);
                     };
                     built.listLabels = infra::Generated<HWND, kListCount>([&](std::size_t l) { return CreateListLabel(parent, m, l); });
                     built.listChoices = infra::Generated<std::array<HWND, kMaxListChoices>, kListCount>(
@@ -1611,15 +1751,30 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         return CreateChild(parent, WC_STATICW, kPicks[pick].nothing, SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                                            Bounds(m, left, at.control, kResetOffset - kCrosshairWidth - 2 * kMargin, m.ControlHeight()));
                     };
-                    built.pickLabels = infra::Generated<HWND, kPickCount>(
-                        [&](std::size_t t) { return CreateLabel(parent, m, kPicks[t].label, PlaceOfRow(Kind::Pick, t, m).left, PlaceOfRow(Kind::Pick, t, m).top, kColumnWidth); });
+                    built.pickLabels = infra::Generated<HWND, kPickCount>([&](std::size_t t) {
+                        const Placement at = PlaceOfRow(Kind::Pick, t, m);
+                        return CreateLabel(parent, m, kPicks[t].label, at.left, at.top, at.width);
+                    });
                     built.crosshairs = infra::Generated<HWND, kPickCount>([&](std::size_t t) { return CreateCrosshair(parent, m, t, findings.window); });
                     built.pickNames = infra::Generated<HWND, kPickCount>([&](std::size_t t) { return CreatePickName(parent, m, t); });
                     built.pickResets = infra::Generated<HWND, kPickCount>([&](std::size_t t) { return CreatePickReset(parent, m, t); });
                     return built;
                 };
+
+                // A frame is made after everything it surrounds. Siblings paint in the order they were made, each clipped
+                // by those before it, so a frame made first would hide its own rows.
+                static constexpr auto BuildFrames = [] [[nodiscard]] (HWND parent, const Metrics& m, Built built) noexcept -> Built {
+                    static constexpr auto CreateFrame = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t f) noexcept -> HWND {
+                        const Placement at = PlaceOfRow(Kind::Frame, f, m);
+                        const int height = static_cast<int>(UnitsOf(Of(static_cast<Frame>(f)), *m.lists)) * m.Unit() - m.Of(kFrameGap);
+                        return CreateChild(parent, WC_BUTTONW, kFrames[f].caption, BS_GROUPBOX, 0, Bounds(m, at.left, at.top, at.width, height));
+                    };
+                    built.frames = infra::Generated<HWND, kFrameCount>([&](std::size_t f) { return CreateFrame(parent, m, f); });
+                    return built;
+                };
                 const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), BuildFields(parent, m, StartingValues(o, live), Built{}));
-                return BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), numbers)));
+                const Built rows = BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), numbers)));
+                return BuildFrames(parent, m, rows);
             };
 
             static constexpr auto CreateTabs = [] [[nodiscard]] (HWND parent, const Metrics& m) noexcept -> HWND {
@@ -1678,6 +1833,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.listLabels,
                                  built.listChoices,
                                  CountsOf(*m.lists),
+                                 built.frames,
                                  o.displayAffinity,
                                  o.clickThrough,
                                  findings.superResolution,
@@ -1701,8 +1857,8 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     static constexpr auto EveryRowPresent = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> bool {
                         // Every span here points into the panel itself, which outlives the answer.
                         static constexpr auto GroupsOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> std::array<std::span<const HWND>, 12> {
-                            return { panel.labels,      panel.sliders,    panel.boxes,      panel.spins,     panel.resets,    panel.toggles,
-                                     panel.groupLabels, panel.pickLabels, panel.crosshairs, panel.pickNames, panel.pickResets };
+                            return { panel.labels,      panel.sliders,    panel.boxes,      panel.spins,     panel.resets,     panel.toggles,
+                                     panel.groupLabels, panel.pickLabels, panel.crosshairs, panel.pickNames, panel.pickResets, panel.frames };
                         };
                         return std::ranges::all_of(GroupsOf(panel), AllPresent) && IsPresent(panel.tabs);
                     };
@@ -1859,11 +2015,19 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
             // asked to redraw itself on every frame. Whether it has moved is read from the page's own first control.
             static constexpr auto PageAlreadyShown = [] [[nodiscard]] (const ControlPanel& panel, Page chosen) noexcept -> bool {
                 static constexpr auto PageMarker = [] [[nodiscard]] (const ControlPanel& panel, Page page) noexcept -> HWND {
-                    // The first control of a row, which stands for the page the row is on. Each kind is indexed only by a row
-                    // of its own kind, so the index is always in range for the array it picks.
+                    // The first control of a row, which stands for the page the row is on. A frame stands for itself, and a
+                    // break for nothing.
                     static constexpr auto MarkerOf = [] [[nodiscard]] (const ControlPanel& panel, const RowSpec& row) noexcept -> HWND {
-                        const std::array<std::span<const HWND>, 5> byKind{ panel.labels, panel.toggles, panel.groupLabels, panel.pickLabels, panel.listLabels };
-                        return byKind[static_cast<std::size_t>(row.kind)][row.index];
+                        // Each kind is indexed only by a row of its own kind, so the index is always in range for the array it picks.
+                        static constexpr auto MarkerOfRow = [] [[nodiscard]] (const ControlPanel& panel, const RowSpec& row) noexcept -> HWND {
+                            const std::array<std::span<const HWND>, 5> byKind{ panel.labels, panel.toggles, panel.groupLabels, panel.pickLabels, panel.listLabels };
+                            return byKind[static_cast<std::size_t>(row.kind)][row.index];
+                        };
+                        if (row.kind == Kind::Break)
+                            return nullptr;
+                        if (row.kind == Kind::Frame)
+                            return panel.frames[row.index];
+                        return MarkerOfRow(panel, row);
                     };
 
                     // A row whose list is empty has no controls, so the page is marked by the first row that does have one.

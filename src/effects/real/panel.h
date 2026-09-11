@@ -49,10 +49,15 @@ enum class List : std::size_t { Preset, Source, Target, Adapter, Count };
 // its title is not something anyone should have to type.
 enum class Pick : std::size_t { Window, Count };
 
+// A group box drawn around rows that belong together, captioned with what they have in common: the tone
+// controls, since style changes nothing while local tone is zero; the skin controls; and the comparison.
+enum class Frame : std::size_t { Tone, Skin, Compare, Count };
+
 constexpr std::size_t kFieldCount = static_cast<std::size_t>(Field::Count);
 constexpr std::size_t kToggleCount = static_cast<std::size_t>(Toggle::Count);
 constexpr std::size_t kGroupCount = static_cast<std::size_t>(Group::Count);
 constexpr std::size_t kPickCount = static_cast<std::size_t>(Pick::Count);
+constexpr std::size_t kFrameCount = static_cast<std::size_t>(Frame::Count);
 constexpr std::size_t kListCount = static_cast<std::size_t>(List::Count);
 constexpr std::size_t kMaxListChoices = 20;
 constexpr std::size_t kMaxChoices = 4;
@@ -107,6 +112,7 @@ struct ControlPanel
     std::array<HWND, kListCount> listLabels;
     std::array<std::array<HWND, kMaxListChoices>, kListCount> listChoices;
     std::array<std::size_t, kListCount> listCounts;
+    std::array<HWND, kFrameCount> frames; // each lies under the rows it surrounds, drawn last so it clips none of them
     // Two settings the panel carries but does not show: off, each spoils the picture rather than changing
     // it, so they are the command line's to set and the panel's to pass on unaltered.
     bool displayAffinity;
