@@ -105,9 +105,19 @@ constexpr float kTolerance = 1e-5f;
     const LiveSettings same = SweepCombination(base, spec, proptest::DrawBelow(rng, 10));
     LiveSettings expected = base;
     expected.neuralRendering = true;
-    // Diagnostic for one compiler: which member differs.
+    // Diagnostic for one compiler: which member differs, and which public piece of the sweep disagrees.
     if (same != expected)
     {
+        SweepSpec onlyIntensity{};
+        onlyIntensity[0] = SweepAxis{ true, 2 };
+        SweepSpec onlyStructure{};
+        onlyStructure[1] = SweepAxis{ true, 2 };
+        const float v = base.tuning.intensity.Get();
+        std::printf("diag2 values0=%u parsed=%.9g valueor=%.9g int/only-int[0]=%.9g int/only-int[1]=%.9g int/only-struc[1]=%.9g struc/only-struc[1]=%.9g\n",
+                    SweepValuesOf(spec, SweepParameter::Intensity), static_cast<double>((*NrIntensityTag::Parse(v)).Get()),
+                    static_cast<double>(NrIntensityTag::Parse(v).value_or(base.tuning.intensity).Get()), static_cast<double>(SweepCombination(base, onlyIntensity, 0).tuning.intensity.Get()),
+                    static_cast<double>(SweepCombination(base, onlyIntensity, 1).tuning.intensity.Get()), static_cast<double>(SweepCombination(base, onlyStructure, 1).tuning.intensity.Get()),
+                    static_cast<double>(SweepCombination(base, onlyStructure, 1).tuning.localStructure.Get()));
         const NrTuning& a = same.tuning;
         const NrTuning& b = expected.tuning;
         std::printf("diag nr=%d/%d preset=%u/%u int=%.9g/%.9g style=%d/%d struc=%.9g/%.9g tone=%.9g/%.9g skin=%.9g/%.9g mask=%d/%d ui=%d/%d passes=%u/%u depthinv=%d/%d mvx=%.9g/%.9g mvy=%.9g/%.9g "

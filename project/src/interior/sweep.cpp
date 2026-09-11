@@ -45,46 +45,63 @@ struct Counting
     return static_cast<float>(digit) / static_cast<float>(values - 1);
 }
 
-// A setting swept runs from nothing up to `top`; one not swept is what it was.
-[[nodiscard]] float ValueOf(float top, float base, const SweepSpec& spec, const Digits& digits, SweepParameter parameter) noexcept
+// Where a swept setting stands: how far along its range this combination puts it.
+[[nodiscard]] float SweptTo(float top, const SweepSpec& spec, const Digits& digits, SweepParameter parameter) noexcept
 {
-    if (!IsSwept(spec, parameter))
-        return base;
     return top * FractionOf(DigitOf(digits, parameter), SweepValuesOf(spec, parameter));
 }
 
-// Skin following local structure is the model's -1, so what skin runs up to is then what local structure has.
-[[nodiscard]] float SkinTop(const NrTuning& t) noexcept
+// A setting not swept is the one the base holds, untouched; one swept runs from nothing up to what the base holds.
+[[nodiscard]] NrIntensity IntensityOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
 {
-    if (t.skinStructure.Get() < 0.0f)
-        return t.localStructure.Get();
-    return t.skinStructure.Get();
+    if (!IsSwept(spec, SweepParameter::Intensity))
+        return base.intensity;
+    return NrIntensityTag::Parse(SweptTo(base.intensity.Get(), spec, digits, SweepParameter::Intensity)).value_or(base.intensity);
+}
+
+[[nodiscard]] Strength StrengthOf(Strength held, const SweepSpec& spec, const Digits& digits, SweepParameter parameter) noexcept
+{
+    if (!IsSwept(spec, parameter))
+        return held;
+    return StrengthTag::Parse(SweptTo(held.Get(), spec, digits, parameter)).value_or(held);
+}
+
+// Skin following local structure is the model's -1, so what skin runs up to is then what local structure has.
+[[nodiscard]] SkinStrength SkinOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+{
+    static constexpr auto TopOf = [] [[nodiscard]] (const NrTuning& t) noexcept -> float {
+        if (t.skinStructure.Get() < 0.0f)
+            return t.localStructure.Get();
+        return t.skinStructure.Get();
+    };
+    if (!IsSwept(spec, SweepParameter::SkinStructure))
+        return base.skinStructure;
+    return SkinStrengthTag::Parse(SweptTo(TopOf(base), spec, digits, SweepParameter::SkinStructure)).value_or(base.skinStructure);
+}
+
+[[nodiscard]] NrStyle StyleOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+{
+    constexpr std::array<NrStyle, kStyleValues> styles{ NrStyle::Standard, NrStyle::Natural, NrStyle::Cinematic };
+    if (!IsSwept(spec, SweepParameter::Style))
+        return base.style;
+    return styles[std::min<std::size_t>(DigitOf(digits, SweepParameter::Style), styles.size() - 1)];
+}
+
+[[nodiscard]] bool MaskOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
+{
+    if (!IsSwept(spec, SweepParameter::AutoMask))
+        return base.autoMask;
+    return DigitOf(digits, SweepParameter::AutoMask) == 1;
 }
 
 [[nodiscard]] NrTuning TuningOf(const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept
 {
-    static constexpr auto StyleOf = [] [[nodiscard]] (const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept -> NrStyle {
-        constexpr std::array<NrStyle, kStyleValues> styles{ NrStyle::Standard, NrStyle::Natural, NrStyle::Cinematic };
-        if (!IsSwept(spec, SweepParameter::Style))
-            return base.style;
-        return styles[std::min<std::size_t>(DigitOf(digits, SweepParameter::Style), styles.size() - 1)];
-    };
-
-    static constexpr auto MaskOf = [] [[nodiscard]] (const NrTuning& base, const SweepSpec& spec, const Digits& digits) noexcept -> bool {
-        if (!IsSwept(spec, SweepParameter::AutoMask))
-            return base.autoMask;
-        return DigitOf(digits, SweepParameter::AutoMask) == 1;
-    };
-    const float intensity = ValueOf(base.intensity.Get(), base.intensity.Get(), spec, digits, SweepParameter::Intensity);
-    const float structure = ValueOf(base.localStructure.Get(), base.localStructure.Get(), spec, digits, SweepParameter::LocalStructure);
-    const float tone = ValueOf(base.localTone.Get(), base.localTone.Get(), spec, digits, SweepParameter::LocalTone);
-    const float skin = ValueOf(SkinTop(base), base.skinStructure.Get(), spec, digits, SweepParameter::SkinStructure);
     return NrTuning{ base.preset,
-                     NrIntensityTag::Parse(intensity).value_or(base.intensity),
+                     IntensityOf(base, spec, digits),
                      StyleOf(base, spec, digits),
-                     StrengthTag::Parse(structure).value_or(base.localStructure),
-                     StrengthTag::Parse(tone).value_or(base.localTone),
-                     SkinStrengthTag::Parse(skin).value_or(base.skinStructure),
+                     StrengthOf(base.localStructure, spec, digits, SweepParameter::LocalStructure),
+                     StrengthOf(base.localTone, spec, digits, SweepParameter::LocalTone),
+                     SkinOf(base, spec, digits),
                      MaskOf(base, spec, digits),
                      base.uiCorrection };
 }
