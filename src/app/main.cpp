@@ -381,6 +381,13 @@ struct Ended
                     // The loader's capability block names DLSSNR.Available only when it can build feature 18 itself.
                     static constexpr auto CheckNeuralRendering = [] [[nodiscard]] (const Console& console, const real::GpuDevice& device, const real::NgxSettings& settings,
                                                                                    std::optional<std::uint32_t> available) noexcept -> Status<Error> {
+                        // The driver's own number travels with the error, so the message names it; nothing means it was not read.
+                        static constexpr auto DriverNumberOf = [] [[nodiscard]] (const real::GpuDevice& device) noexcept -> std::uint32_t {
+                            if (!device.nvidia || !device.driverVersion.has_value())
+                                return 0;
+                            return interior::NvidiaDriverNumber(*device.driverVersion);
+                        };
+
                         static constexpr auto MissingAvailabilityText = [] [[nodiscard]] (const real::GpuDevice& device) noexcept -> Line {
                             static constexpr auto RequiredDriverText = [] [[nodiscard]] () noexcept -> Line {
                                 return infra::Formatted<kLineCapacity>("{}.{:02}", interior::NvidiaDriverMajor(interior::kFirstNeuralRenderingDriver),
@@ -394,21 +401,26 @@ struct Ended
                         static constexpr auto CheckAvailabilityValue = [] [[nodiscard]] (const Console& console, const real::NgxSettings& settings, std::uint32_t available) noexcept -> Status<Error> {
                             // The loader builds feature 18 from nvngx_dlssnr.dll in the executable folder or --ngx-path; a zero
                             // with no such file means there is nothing to build from, a zero with the file means it was rejected.
+                            // Each is its own error, so the message the operator sees says which; the log adds where the file was.
                             static constexpr auto ZeroAvailabilityText = [] [[nodiscard]] (const std::optional<interior::DirectoryPath>& model) noexcept -> Line {
                                 if (!model.has_value())
                                     return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 and there is no nvngx_dlssnr.dll next to FullScreenWrapperForDLSS5.exe or in "
-                                                                           "--ngx-path; put NVIDIA's DLSS 5 model there");
+                                                                           "--ngx-path");
                                 const std::array<char, interior::DirectoryPath::Capacity + 1> directory = infra::NarrowedChars<interior::DirectoryPath::Capacity + 1>(model->Get());
-                                return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 although nvngx_dlssnr.dll is in {}; the loader rejected that build, see nvngx.log",
+                                return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 although nvngx_dlssnr.dll is in {}; the loader rejected that build",
                                                                        directory.data());
                             };
+
+                            static constexpr auto ZeroAvailabilityError = [] [[nodiscard]] (const std::optional<interior::DirectoryPath>& model) noexcept -> Error {
+                                return Error{ model.has_value() ? real::ApiCall::NgxNeuralRenderingUnavailable : real::ApiCall::NgxModelMissing, 0 };
+                            };
                             if (available == 0)
-                                return Fail(
-                                    Logged(console, Explanation{ ZeroAvailabilityText(real::NeuralRenderingModelLocation(settings)).Get(), Error{ real::ApiCall::NgxNeuralRenderingUnavailable, 2 } }));
+                                return Fail(Logged(console, Explanation{ ZeroAvailabilityText(real::NeuralRenderingModelLocation(settings)).Get(),
+                                                                         ZeroAvailabilityError(real::NeuralRenderingModelLocation(settings)) }));
                             return Log(console, LogLevel::Info, infra::Formatted<kLineCapacity>("DLSSNR.Available = {}", available).Get());
                         };
                         if (!available.has_value())
-                            return Fail(Logged(console, Explanation{ MissingAvailabilityText(device).Get(), Error{ real::ApiCall::NgxNeuralRenderingUnavailable, 1 } }));
+                            return Fail(Logged(console, Explanation{ MissingAvailabilityText(device).Get(), Error{ real::ApiCall::NgxDriverTooOld, DriverNumberOf(device) } }));
                         return CheckAvailabilityValue(console, settings, *available);
                     };
                     if (!neuralRendering)

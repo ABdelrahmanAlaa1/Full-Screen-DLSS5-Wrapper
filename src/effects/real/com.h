@@ -92,6 +92,8 @@ enum class ApiCall : std::uint8_t {
     NgxOptimalSettings,
     NgxParameterRoundTrip,
     NgxNeuralRenderingUnavailable,
+    NgxModelMissing, // nvngx_dlssnr.dll is nowhere the loader looks, so there is nothing to build the feature from
+    NgxDriverTooOld, // the driver's NGX loader does not know the feature; the code is the driver's own number, or 0 when that could not be read
     WindowNotFound,
     OpenModelFile,
     ModelNotSigned,
@@ -134,7 +136,7 @@ struct Error
 template <class T>
 using Com = Microsoft::WRL::ComPtr<T>;
 
-using ErrorText = infra::BoundedString<char, 200>;
+using ErrorText = infra::BoundedString<char, 400>;
 
 [[nodiscard]] std::string_view Describe(ApiCall call) noexcept;
 [[nodiscard]] ErrorText Describe(const Error& error) noexcept;

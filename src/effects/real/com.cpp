@@ -1,6 +1,7 @@
 #include "effects/real/com.h"
 
 #include "infrastructure/text.h"
+#include "interior/driver.h"
 
 namespace real {
 
@@ -87,7 +88,13 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::OpenModelFile: return "opening nvngx_dlssnr.dll to check its signature";
     case ApiCall::ModelNotSigned: return "nvngx_dlssnr.dll carries no signature Windows will trust";
     case ApiCall::ModelNotFromNvidia: return "nvngx_dlssnr.dll is signed, but not by NVIDIA";
-    case ApiCall::NgxNeuralRenderingUnavailable: return "DLSS 5 Neural Rendering is unavailable (DLSSNR.Available)";
+    case ApiCall::NgxNeuralRenderingUnavailable:
+        return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
+               "the loader's own account of why.";
+    case ApiCall::NgxModelMissing:
+        return "DLSS 5 Neural Rendering needs NVIDIA's model file, nvngx_dlssnr.dll, and there is no such file next to FullScreenWrapperForDLSS5.exe or in the folder --ngx-path names.\n\n"
+               "The model is NVIDIA's to distribute, so it cannot be included with this program. Search the web for nvngx_dlssnr.dll and put a copy in one of those two places.";
+    case ApiCall::NgxDriverTooOld: return "DLSS 5 Neural Rendering is not offered by this NVIDIA driver: its NGX loader has no DLSSNR.Available";
     case ApiCall::TextureDescriptionMismatch: return "a created texture does not match its description";
     case ApiCall::PlanFrame: return "frame planning";
     case ApiCall::LoadOpticalFlow: return "loading nvofapi64.dll";
@@ -120,6 +127,22 @@ std::string_view Describe(ApiCall call) noexcept
 
 ErrorText Describe(const Error& error) noexcept
 {
+    // The one error that is about the driver carries the driver's number as its code, and says which is needed.
+    static constexpr auto DriverText = [] [[nodiscard]] (std::uint32_t installed) noexcept -> ErrorText {
+        static constexpr auto InstalledText = [] [[nodiscard]] (std::uint32_t installed) noexcept -> infra::BoundedString<char, 64> {
+            if (installed == 0)
+                return infra::Formatted<64>("the installed version could not be read");
+            return infra::Formatted<64>("this is {}.{:02}", interior::NvidiaDriverMajor(installed), interior::NvidiaDriverMinor(installed));
+        };
+        return infra::Formatted<ErrorText::Capacity>("{}. Driver {}.{:02} or newer is required, and {}.", Describe(ApiCall::NgxDriverTooOld),
+                                                     interior::NvidiaDriverMajor(interior::kFirstNeuralRenderingDriver), interior::NvidiaDriverMinor(interior::kFirstNeuralRenderingDriver),
+                                                     InstalledText(installed).Get());
+    };
+    if (error.call == ApiCall::NgxDriverTooOld)
+        return DriverText(error.code);
+    // No call fails with a code of zero, so a zero is an error that has said all it has to say.
+    if (error.code == 0)
+        return infra::Formatted<ErrorText::Capacity>("{}", Describe(error.call));
     return infra::Formatted<ErrorText::Capacity>("{} failed with 0x{:08X}", Describe(error.call), error.code);
 }
 

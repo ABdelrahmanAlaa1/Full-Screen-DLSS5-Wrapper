@@ -83,7 +83,8 @@ before the check, and it says nothing about a model loaded from anywhere else.
 - NVIDIA's DLSS 5 model, `nvngx_dlssnr.dll`, next to `FullScreenWrapperForDLSS5.exe` or in the folder given by
   `--ngx-path`. NGX looks for feature DLLs in the application folder and the listed paths, the way
   games ship `nvngx_dlss.dll`; the driver does not install this one and this tool does not ship it.
-  Without it the loader reports `DLSSNR.Available = 0` and this tool stops with a message saying so.
+  Without it the loader reports `DLSSNR.Available = 0` and this tool stops with a message saying the file
+  is missing, where it looked, and that the file has to be found elsewhere, since it cannot be shipped here.
 - Optional, for super resolution: `nvngx_dlss.dll`, in the same two folders. Games carry a copy and the
   DLSS SDK ships one; recent drivers keep one of their own, which is what a session uses when neither
   folder has one. Without any of them the panel greys the super resolution choice and says why.
