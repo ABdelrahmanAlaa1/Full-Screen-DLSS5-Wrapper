@@ -157,7 +157,7 @@ constexpr wchar_t kNoSuperResolution[] = L"Not offered.\n"
                                          L"The rest of the session runs without it.";
 
 constexpr std::array<GroupSpec, kGroupCount> kGroups{ {
-    { L"Compare", L"What the window shows: the model's work, the picture as captured, or both either side of a divider.", 3, { L"Processed", L"Original", L"Split" }, nullptr },
+    { L"Compare", L"What the window shows: the model's work, both either side of a divider, or the picture as captured.", 3, { L"Processed", L"Split", L"Original" }, nullptr },
     { L"Style", L"Which of the model's three looks to ask for. The model clamps anything else.", 3, { L"Standard", L"Natural", L"Cinematic" }, nullptr },
     { L"Cursor", L"Whether the captured picture includes the mouse pointer. Auto keeps the session's own choice.", 3, { L"Auto", L"On", L"Off" }, nullptr },
     { L"Motion vectors",
@@ -597,6 +597,24 @@ void SetChecked(HWND check, bool checked) noexcept
     const std::span<const HWND> choices = ChoicesOf(panel, group);
     const auto found = std::ranges::find_if(choices, IsChecked);
     return found == choices.end() ? fallback : static_cast<std::size_t>(std::ranges::distance(choices.begin(), found));
+}
+
+// --- the comparison ------------------------------------------------------------------------------------
+
+// The compare buttons run Processed, Split, Original, so the two whole pictures stand either side of the
+// view that shows both. DisplayMode counts them in another order, so a choice is looked up rather than cast.
+constexpr std::array<interior::DisplayMode, 3> kCompareChoices{ interior::DisplayMode::Processed, interior::DisplayMode::Split, interior::DisplayMode::Original };
+static_assert(kCompareChoices.size() == kGroups[static_cast<std::size_t>(Group::Compare)].count);
+
+[[nodiscard]] interior::DisplayMode DisplayFrom(std::size_t choice) noexcept
+{
+    return kCompareChoices[std::min(choice, kCompareChoices.size() - 1)];
+}
+
+[[nodiscard]] std::size_t ChoiceOfDisplay(interior::DisplayMode display) noexcept
+{
+    const auto found = std::ranges::find(kCompareChoices, display);
+    return found == kCompareChoices.end() ? 0 : static_cast<std::size_t>(std::ranges::distance(kCompareChoices.begin(), found));
 }
 
 // --- the values the controls start at -----------------------------------------------------------------
@@ -1372,8 +1390,15 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         const auto found = std::ranges::find(grids, grid);
                         return found == grids.end() ? 0 : static_cast<std::size_t>(std::ranges::distance(grids.begin(), found));
                     };
-                    return { static_cast<std::size_t>(display),    interior::StyleCode(o.tuning.style), static_cast<std::size_t>(o.cursor), static_cast<std::size_t>(o.motion),  CodeOfGrid(o.nvofGrid),
-                             static_cast<std::size_t>(o.nvofPerf), static_cast<std::size_t>(o.sr),      static_cast<std::size_t>(o.format), static_cast<std::size_t>(o.logLevel) };
+                    return { ChoiceOfDisplay(display),
+                             interior::StyleCode(o.tuning.style),
+                             static_cast<std::size_t>(o.cursor),
+                             static_cast<std::size_t>(o.motion),
+                             CodeOfGrid(o.nvofGrid),
+                             static_cast<std::size_t>(o.nvofPerf),
+                             static_cast<std::size_t>(o.sr),
+                             static_cast<std::size_t>(o.format),
+                             static_cast<std::size_t>(o.logLevel) };
                 };
 
                 static constexpr auto PlaceOfRow = [] [[nodiscard]] (Kind kind, std::size_t index, const Metrics& m) noexcept -> Placement {
@@ -1814,11 +1839,6 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
 
 PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSettings& current) noexcept
 {
-    static constexpr auto DisplayFrom = [] [[nodiscard]] (std::size_t index) noexcept -> interior::DisplayMode {
-        constexpr std::array<interior::DisplayMode, 3> modes{ interior::DisplayMode::Processed, interior::DisplayMode::Original, interior::DisplayMode::Split };
-        return modes[std::min(index, modes.size() - 1)];
-    };
-
     static constexpr auto SurfaceOf = [] [[nodiscard]] (const ControlPanel& panel) noexcept -> interior::SurfaceSettings {
         static constexpr auto CursorFrom = [] [[nodiscard]] (std::size_t index) noexcept -> interior::CursorMode {
             constexpr std::array<interior::CursorMode, 3> modes{ interior::CursorMode::Auto, interior::CursorMode::On, interior::CursorMode::Off };
@@ -2004,7 +2024,7 @@ interior::CommandLine RestartCommandLine(const ControlPanel& panel, const interi
     static constexpr auto SurfaceArguments = [] [[nodiscard]] (const ControlPanel& panel, const Arguments& so) noexcept -> Arguments {
         constexpr std::array<const char*, 3> cursor{ "auto", "on", "off" };
         constexpr std::array<const char*, 4> levels{ "0", "1", "2", "3" };
-        constexpr std::array<const char*, 3> compare{ "off", "original", "split" };
+        constexpr std::array<const char*, 3> compare{ "off", "split", "original" }; // in the order of the buttons
         const std::array<Piece, 11> pieces{ Switch(panel, Toggle::UiCorrection, "nr-ui-correction"),
                                             Switch(panel, Toggle::Vsync, "vsync"),
                                             Decimal("depth-value", SettledValue(panel, Field::DepthValue)),
@@ -2074,7 +2094,7 @@ void ApplyDisplay(const ControlPanel& panel, interior::DisplayMode display) noex
     static constexpr auto ChooseOnly = [](std::span<const HWND> group, std::size_t index) noexcept -> void {
         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, group.size()), [group, index](std::size_t i) { SetChecked(group[i], i == index); });
     };
-    ChooseOnly(ChoicesOf(panel, Group::Compare), static_cast<std::size_t>(display));
+    ChooseOnly(ChoicesOf(panel, Group::Compare), ChoiceOfDisplay(display));
 }
 
 void ApplySplit(const ControlPanel& panel, interior::Fraction split) noexcept
