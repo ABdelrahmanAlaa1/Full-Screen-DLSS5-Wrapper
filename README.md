@@ -21,7 +21,7 @@ See example screenshots below.
 
 ## Key Features:
 - It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
-- Does NOT inject itself into any applications. It reads the final screen output and processes that.
+- Does NOT inject itself into any applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/DLSS5-Entire-Screen#how-it-works) explanation below)
   - Therefore it won't trigger a false positive for any anti-cheats any more than a normal screen recorder would.
 - Full control over internal model inputs. Including uncapped values for structure and tone.
 - Ability to selectively apply it to a specific window.
@@ -70,3 +70,15 @@ See example screenshots below.
 
 ## Optional:
 - `nvngx_dlss.dll` - Enables use of super resolution options. Also put that next to the `exe`.
+
+# How It Works
+On a simple level, it:
+1. Captures the regular screen output (or a screen region) using the Windows API
+2. Passes the video stream into the DLSS5 model (which is in the `dll` file), along with chosen processing options.
+3. Receives the new processed video data
+4. Creates a brand new borderless window that is shown on top.
+    - In other words, it doesn't directly modify the other apps themselves. They still are technically showing their original windows underneath it. Almost as if you put a video camera recording the screen, which applies effects then outputs to a second monitor. Except in this case it's a new window.
+    - This window is "click through", so it is effectively invisible to the cursor. This means you can click, hover, and interact with everything beneath just as you normally would.
+    - If you have it set to affect only a specific window, it only covers that window. If set to apply to the whole screen, the window covers the entire screen. 
+
+For a much more detailed and technical explanation, see the [Advanced Readme](https://github.com/ThioJoe/DLSS5-Entire-Screen/blob/main/Readme_Advanced.md) file  (`Readme_Advanced.md`).
