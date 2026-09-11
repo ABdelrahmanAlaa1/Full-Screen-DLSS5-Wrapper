@@ -179,6 +179,13 @@ constexpr std::array<GroupSpec, kGroupCount> kGroups{ {
     { L"Log level", L"How much the log says.", 4, { L"Debug", L"Info", L"Warn", L"Error" }, nullptr },
 } };
 
+// Whether a group's warning applies. The only group that carries one is super resolution, and what it
+// warns of is the model being absent, which the session settled before the panel was built.
+[[nodiscard]] bool Warns(std::size_t group, const PanelFindings& findings) noexcept
+{
+    return kGroups[group].warning != nullptr && !findings.superResolution;
+}
+
 struct ListSpec
 {
     const wchar_t* label;
@@ -1080,12 +1087,10 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
                             return { panel.pickLabels[t], panel.crosshairs[t], panel.pickNames[t], panel.pickResets[t] };
                         };
 
+                        // A group's glyph exists only when its warning applies, so showing nothing is showing it.
                         static constexpr auto ShowGroup = [](const ControlPanel& panel, std::size_t group, int how) noexcept -> void {
-                            // The only group that carries a warning is super resolution, and what it warns of is the model being
-                            // absent, which the session settled before the panel was built.
-                            static constexpr auto WarningHow = [] [[nodiscard]] (const ControlPanel& panel, int how) noexcept -> int { return HowOf(how == SW_SHOW && !panel.superResolution); };
                             (void)::ShowWindow(panel.groupLabels[group], how);
-                            (void)::ShowWindow(panel.groupWarnings[group], WarningHow(panel, how));
+                            (void)::ShowWindow(panel.groupWarnings[group], how);
                             ShowAll(ChoicesOf(panel, static_cast<Group>(group)), how);
                         };
                         if (row.kind == Kind::Group)
@@ -1665,7 +1670,8 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     return built;
                 };
 
-                static constexpr auto BuildGroups = [] [[nodiscard]] (HWND parent, const Metrics& m, const std::array<std::size_t, kGroupCount>& chosen, Built built) noexcept -> Built {
+                static constexpr auto BuildGroups = [] [[nodiscard]] (HWND parent, const Metrics& m, const std::array<std::size_t, kGroupCount>& chosen, const PanelFindings& findings,
+                                                                      Built built) noexcept -> Built {
                     static constexpr auto CreateChoices = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t group, std::size_t chosen) noexcept -> std::array<HWND, kMaxChoices> {
                         // Four choices at the usual width run past the column, and past the window from the right-hand one.
                         static constexpr auto WidthOfChoice = [] [[nodiscard]] (const Placement& at, std::size_t count) noexcept -> int {
@@ -1683,20 +1689,21 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                             return choice;
                         });
                     };
-                    // A group with a warning wears the glyph in front of its label, and the label starts after it.
-                    static constexpr auto GroupInset = [] [[nodiscard]] (std::size_t g) noexcept -> int { return kGroups[g].warning == nullptr ? 0 : kWarningWidth; };
+                    // A group whose warning applies wears the glyph in front of its label, and the label starts after it; one
+                    // whose warning does not apply has no glyph, and its label starts where every other label does.
+                    static constexpr auto GroupInset = [] [[nodiscard]] (std::size_t g, const PanelFindings& findings) noexcept -> int { return Warns(g, findings) ? kWarningWidth : 0; };
 
-                    static constexpr auto CreateGroupWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t g) noexcept -> HWND {
-                        if (kGroups[g].warning == nullptr)
+                    static constexpr auto CreateGroupWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t g, const PanelFindings& findings) noexcept -> HWND {
+                        if (!Warns(g, findings))
                             return nullptr;
                         const Placement at = PlaceOfRow(Kind::Group, g, m);
                         return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_CENTERIMAGE | SS_NOTIFY, 0, Bounds(m, at.left, at.top, kWarningWidth - 4, m.LabelHeight()));
                     };
                     built.groupLabels = infra::Generated<HWND, kGroupCount>([&](std::size_t g) {
                         const Placement at = PlaceOfRow(Kind::Group, g, m);
-                        return CreateLabel(parent, m, kGroups[g].label, at.left + GroupInset(g), at.top, at.width - GroupInset(g));
+                        return CreateLabel(parent, m, kGroups[g].label, at.left + GroupInset(g, findings), at.top, at.width - GroupInset(g, findings));
                     });
-                    built.groupWarnings = infra::Generated<HWND, kGroupCount>([&](std::size_t g) { return CreateGroupWarning(parent, m, g); });
+                    built.groupWarnings = infra::Generated<HWND, kGroupCount>([&](std::size_t g) { return CreateGroupWarning(parent, m, g, findings); });
                     built.choices = infra::Generated<std::array<HWND, kMaxChoices>, kGroupCount>([&](std::size_t g) { return CreateChoices(parent, m, g, chosen[g]); });
                     return built;
                 };
@@ -1804,7 +1811,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     return built;
                 };
                 const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), BuildFields(parent, m, StartingValues(o, live), Built{}));
-                const Built rows = BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), numbers)));
+                const Built rows = BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), findings, numbers)));
                 return BuildFrames(parent, m, rows);
             };
 
