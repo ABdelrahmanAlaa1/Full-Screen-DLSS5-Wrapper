@@ -1,6 +1,6 @@
 # Working rules for this repository
 
-These are in addition to the *Rules for AI-Written Code* in `AI_CODE_RULES.md`; `COMPLIANCE.md` records how the code meets them.
+These are in addition to the *Rules for AI-Written Code* in `AI_CODE_RULES.md`.
 
 ## Fill every field of a record, always
 

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(FullScreenWrapperForDLSS5 VERSION 0.2.0 LANGUAGES CXX)
 
-# Layout (see COMPLIANCE.md):
+# Layout:
 #   src/infrastructure  generic primitives, contracts, tracing (the only metaprogramming)
 #   src/interior        pure domain logic: no OS headers, no exceptions, results as values
 #   src/effects/sim     seeded simulator of the effect layer (portable)

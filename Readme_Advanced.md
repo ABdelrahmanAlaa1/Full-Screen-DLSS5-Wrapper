@@ -17,9 +17,9 @@ third-party overlay on principle, whatever it is doing. Check the rules of anyth
 alongside; the design avoids the techniques anti-cheat is built to catch, but it cannot make the tool
 invisible, and nothing here should be read as a guarantee against a ban.
 
-This is a from-scratch rewrite under the *Rules for AI-Written Code* (`AI_CODE_RULES.md`; `COMPLIANCE.md`
-maps each rule to the code): a pure planning core, a seeded simulator of the effect layer, property tests
-with mutation testing, build-applied call tracing, and contracts that run in production.
+This is a from-scratch rewrite under the *Rules for AI-Written Code* (`AI_CODE_RULES.md`): a pure
+planning core, a seeded simulator of the effect layer, property tests with mutation testing, build-applied
+call tracing, and contracts that run in production.
 
 ## This is not what DLSS 5 looks like in a game
 
@@ -283,5 +283,4 @@ flat plane changes little. None of these carries a range, so this tool imposes n
 
 `gate/gate.sh` (Linux, portable targets) and `gate/gate.ps1` (Windows, everything) run: the build with
 warnings as errors and tracing, the formatter check, the property tests under several seeds, the
-sanitizers, mutation testing, and the dependency-lock check. `COMPLIANCE.md` maps every rule to its
-enforcement.
+sanitizers, mutation testing, and the dependency-lock check.
