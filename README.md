@@ -12,6 +12,13 @@ See example screenshots below.
 <img width="750" src="https://github.com/user-attachments/assets/0db29600-2e94-4714-9c36-5dbe2a446619" />
 </p>
 
+## How to Download and Use
+
+1. Go to the [Releases](https://github.com/ThioJoe/DLSS5-Entire-Screen/releases) page.
+2. For the latest release, look under Assets, then download `FullScreenWrapperForDLSS5.exe`
+3. Acquire `nvngx_dlss.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/DLSS5-Entire-Screen#requirements) section below)
+4. Run the `exe` (no installation required).
+
 ## Key Features:
 - It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
 - Does NOT inject itself into any applications. It reads the final screen output and processes that.
@@ -50,6 +57,7 @@ See example screenshots below.
 <p align="center">
 <img width="2554" height="1585" alt="Oblivion 20x" src="https://github.com/user-attachments/assets/9f2422c9-cc0c-4bff-81cc-02a0c210882b" />
 </p>
+
 
 ## Requirements
 
