@@ -386,7 +386,7 @@ Options DefaultOptions() noexcept
         NgxLogLevel::Off,
         DirectoryPath{},
         true,
-        true,
+        false,
         true,
         false,
         false,

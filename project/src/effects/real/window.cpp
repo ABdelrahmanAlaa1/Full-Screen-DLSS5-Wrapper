@@ -560,6 +560,13 @@ void KeepOutputWindowBehind(const OutputWindow& window, HWND front) noexcept
     (void)::SetWindowPos(window.handle.get(), front, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+void RaiseOutputWindow(const OutputWindow& window) noexcept
+{
+    if (IsTopmostWindow(window.handle.get()))
+        return;
+    (void)::SetWindowPos(window.handle.get(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void ShowOutputWindow(const OutputWindow& window) noexcept
 {
     ::ShowWindow(window.handle.get(), SW_SHOWNOACTIVATE);

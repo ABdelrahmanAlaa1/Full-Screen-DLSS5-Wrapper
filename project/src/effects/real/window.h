@@ -74,6 +74,12 @@ void MoveOutputWindowAbove(const OutputWindow& window, const interior::ScreenRec
 [[nodiscard]] bool IsOutputWindowBehind(const OutputWindow& window, HWND front) noexcept;
 void KeepOutputWindowBehind(const OutputWindow& window, HWND front) noexcept;
 
+// Whether a window has the style that keeps it above every window without it.
+[[nodiscard]] bool IsTopmostWindow(HWND window) noexcept;
+
+// Puts the overlay back above everything, for after it was kept behind a window that is not.
+void RaiseOutputWindow(const OutputWindow& window) noexcept;
+
 // Puts a window back into every capture on the machine, for when our own capture excludes it by name.
 [[nodiscard]] infra::Status<Error> UncoverWindow(HWND window) noexcept;
 [[nodiscard]] infra::Result<OutputWindow, Error> CreateOutputWindow(const interior::ScreenRect& rect, const WindowSettings& settings) noexcept;

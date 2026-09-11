@@ -149,7 +149,10 @@ constexpr std::array<ToggleSpec, kToggleCount> kToggles{ {
       nullptr },
     { L"Vsync", L"Present in step with the monitor. Off presents as fast as the pipeline allows, which tears.", true, nullptr },
     { L"Capture border", L"Let Windows draw its yellow border around what is being captured.", true, nullptr },
-    { L"Always on top", L"Keep the output window above every other window.", true, nullptr },
+    { L"Always on top",
+      L"Keep this panel above every other window, the output window included.\r\nOff, it is above the output only while it is the window being used, so on one monitor it is out of the way "
+      L"until it is brought back from the taskbar.",
+      true, nullptr },
     { L"Redirection surface", L"Give the output window a GDI surface. Diagnostic; fixed when the window is made.", true, nullptr },
     { L"Direct3D debug layer",
       L"Turn on the Direct3D 12 validation layer. Slow, and only useful when chasing a fault. Windows turns it on for the whole program and will not turn it off, so turning it off here starts the "
@@ -1417,9 +1420,9 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                             .hIconSm = nullptr };
     };
 
-    static constexpr auto CreatePanelWindow = [] [[nodiscard]] () noexcept -> Result<UniqueWindow, Error> {
-        HWND window = ::CreateWindowExW(WS_EX_TOPMOST, kPanelClass, L"Full-Screen Wrapper for DLSS5 \u2014 controls", kPanelStyle, CW_USEDEFAULT, CW_USEDEFAULT, kPanelWidth, kPanelWidth, nullptr,
-                                        nullptr, ::GetModuleHandleW(nullptr), nullptr);
+    static constexpr auto CreatePanelWindow = [] [[nodiscard]] (bool topmost) noexcept -> Result<UniqueWindow, Error> {
+        HWND window = ::CreateWindowExW(topmost ? WS_EX_TOPMOST : 0u, kPanelClass, L"Full-Screen Wrapper for DLSS5 \u2014 controls", kPanelStyle, CW_USEDEFAULT, CW_USEDEFAULT, kPanelWidth,
+                                        kPanelWidth, nullptr, nullptr, ::GetModuleHandleW(nullptr), nullptr);
         if (window == nullptr)
             return Fail(LastError(ApiCall::CreateWindowExW));
         return UniqueWindow(window);
@@ -2072,7 +2075,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
     return RegisterWindowClass(ClassDescription())
         .and_then([] { return RegisterWindowClass(CrosshairDescription()); })
         .and_then([] { return RegisterWindowClass(HighlightDescription()); })
-        .and_then([&] { return CreatePanelWindow().and_then([&](UniqueWindow window) { return Populated(std::move(window), options, live, display, findings); }); });
+        .and_then([&] { return CreatePanelWindow(options.topmost).and_then([&](UniqueWindow window) { return Populated(std::move(window), options, live, display, findings); }); });
 }
 
 PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSettings& current) noexcept
@@ -2087,7 +2090,7 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
             constexpr std::array<interior::LogLevel, 4> levels{ interior::LogLevel::Debug, interior::LogLevel::Info, interior::LogLevel::Warn, interior::LogLevel::Error };
             return levels[std::min(index, levels.size() - 1)];
         };
-        return interior::SurfaceSettings{ CursorFrom(ChosenIn(panel, Group::Cursor, 0)),    IsOn(panel, Toggle::CaptureBorder), panel.displayAffinity, IsOn(panel, Toggle::Topmost), panel.clickThrough,
+        return interior::SurfaceSettings{ CursorFrom(ChosenIn(panel, Group::Cursor, 0)), IsOn(panel, Toggle::CaptureBorder), panel.displayAffinity, panel.clickThrough,
                                           LogLevelFrom(ChosenIn(panel, Group::LogLevel, 1)) };
     };
 
@@ -2217,8 +2220,17 @@ PanelReading ReadControlPanel(const ControlPanel& panel, const interior::LiveSet
             ApplyPicks(panel);
             SettleAll(panel);
         };
+        // The panel is above every other window only while its switch says so; the switch is read each frame
+        // like the rest, and the window is asked to move only when its standing differs from the switch.
+        static constexpr auto ApplyTopmost = [](const ControlPanel& panel) noexcept -> void {
+            const bool wanted = IsOn(panel, Toggle::Topmost);
+            if (wanted == IsTopmostWindow(panel.window.get()))
+                return;
+            (void)::SetWindowPos(panel.window.get(), wanted ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        };
         ShowChosenPage(panel);
         ApplyNotice(panel);
+        ApplyTopmost(panel);
         ApplyEnables(panel);
         Readback(panel);
     };

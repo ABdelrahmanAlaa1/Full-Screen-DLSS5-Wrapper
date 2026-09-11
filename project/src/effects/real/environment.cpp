@@ -312,12 +312,17 @@ void RealEnvironment::Behind(HWND front) noexcept
 }
 
 // The panel is another of our windows, and an overlay covering the monitor is in front of everything and
-// left out of the capture that draws over it: on one screen the panel would be nowhere at all.
+// left out of the capture that draws over it: on one screen the panel would be nowhere at all. So the
+// overlay is kept just behind the panel while the panel is above everything itself, or is the window the
+// operator is using; the rest of the time it is above everything, and the panel is out of the way.
 void RealEnvironment::Fronted() noexcept
 {
-    if (!applied_.surface.topmost)
-        return;
-    Behind(PanelWindow(panel_));
+    static constexpr auto IsInUse = [] [[nodiscard]] (HWND panel) noexcept -> bool { return panel != nullptr && (IsTopmostWindow(panel) || ::GetForegroundWindow() == panel); };
+    HWND panel = PanelWindow(panel_);
+    if (IsInUse(panel))
+        Behind(panel);
+    else
+        RaiseOutputWindow(window_);
 }
 
 void RealEnvironment::Followed(interior::Instant now) noexcept
@@ -577,11 +582,14 @@ Status<Error> RealEnvironment::Resurfaced(const interior::SurfaceSettings& surfa
             return s.cursor == interior::CursorMode::On;
         };
 
-        static constexpr auto WindowSettingsOf = [] [[nodiscard]] (const interior::SurfaceSettings& s) noexcept -> WindowSettings {
-            return WindowSettings{ .topmost = s.topmost, .clickThrough = s.clickThrough, .excludeFromCapture = s.displayAffinity, .redirectionBitmap = false };
+        // The overlay is above everything when it covers a monitor, and just above the window it follows otherwise.
+        static constexpr auto WindowSettingsOf = [] [[nodiscard]] (const EnvironmentSettings& settings) noexcept -> WindowSettings {
+            return WindowSettings{
+                .topmost = !settings.followed.has_value(), .clickThrough = settings.surface.clickThrough, .excludeFromCapture = settings.surface.displayAffinity, .redirectionBitmap = false
+            };
         };
         return ApplyCaptureSettings(gpu.capture, CaptureSettings{ CursorWanted(settings.surface, settings.captureCursor), settings.surface.captureBorder }).and_then([&] {
-            return ApplyWindowSettings(window, WindowSettingsOf(settings.surface));
+            return ApplyWindowSettings(window, WindowSettingsOf(settings));
         });
     };
     if (surface == applied_.surface)

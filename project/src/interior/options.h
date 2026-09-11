@@ -45,7 +45,6 @@ struct SurfaceSettings
     CursorMode cursor;
     bool captureBorder;
     bool displayAffinity;
-    bool topmost;
     bool clickThrough;
     LogLevel logLevel;
     [[nodiscard]] friend constexpr bool operator==(const SurfaceSettings&, const SurfaceSettings&) noexcept = default;

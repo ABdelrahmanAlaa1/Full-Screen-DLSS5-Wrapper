@@ -208,9 +208,9 @@ using Caption = real::ChoiceText;
         };
 
         static constexpr auto WindowSettingsOf = [] [[nodiscard]] (const Options& o) noexcept -> real::WindowSettings {
-            return real::WindowSettings{
-                .topmost = o.topmost && o.window.IsEmpty(), .clickThrough = o.clickThrough, .excludeFromCapture = o.displayAffinity, .redirectionBitmap = o.redirectionBitmap
-            };
+            // The overlay is above everything when it covers a monitor. Over one window it stays just above that
+            // window instead, so a window raised in front of the one being worked on covers the overlay too.
+            return real::WindowSettings{ .topmost = o.window.IsEmpty(), .clickThrough = o.clickThrough, .excludeFromCapture = o.displayAffinity, .redirectionBitmap = o.redirectionBitmap };
         };
         return WarnFeedback(console, b.options, b.geometry)
             .and_then([&] { return real::CreateOutputWindow(b.geometry.targetRect, WindowSettingsOf(b.options)); })
@@ -220,7 +220,7 @@ using Caption = real::ChoiceText;
     static constexpr auto SettingsOf = [] [[nodiscard]] (const Base& b, const SessionPlan& plan) noexcept -> real::EnvironmentSettings {
         static constexpr auto AsksToBeLeftOut = [] [[nodiscard]] (const Options& o, const Geometry& g) noexcept -> bool { return o.excludeOwnWindows && IsInItsOwnCapture(o, g); };
         const Options& o = b.options;
-        return real::EnvironmentSettings{ .surface = interior::SurfaceSettings{ o.cursor, o.captureBorder, o.displayAffinity, o.topmost, o.clickThrough, o.logLevel },
+        return real::EnvironmentSettings{ .surface = interior::SurfaceSettings{ o.cursor, o.captureBorder, o.displayAffinity, o.clickThrough, o.logLevel },
                                           .captureCursor = plan.captureCursor,
                                           .followed = FollowedWindow(b),
                                           .asksToBeLeftOut = AsksToBeLeftOut(o, b.geometry),
