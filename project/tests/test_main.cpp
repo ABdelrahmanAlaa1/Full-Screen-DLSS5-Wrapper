@@ -16,7 +16,7 @@ namespace {
 int main(int argc, char** argv)
 {
     const std::uint64_t seed = SeedFromArgs(argc, argv);
-    const std::array<tests::Suite, 6> suites{ tests::UnitsSuite, tests::OptionsSuite, tests::MonitorsSuite, tests::PlanSuite, tests::FrameSuite, tests::SimulationSuite };
+    const std::array<tests::Suite, 7> suites{ tests::UnitsSuite, tests::OptionsSuite, tests::MonitorsSuite, tests::PlanSuite, tests::FrameSuite, tests::SimulationSuite, tests::CaptureNameSuite };
     std::uint32_t failures = 0;
     for (const tests::Suite suite : suites) // WAIVER(R2): test driver loop.
         failures += suite(seed);

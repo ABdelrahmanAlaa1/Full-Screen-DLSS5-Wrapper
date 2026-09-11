@@ -76,6 +76,7 @@ add_library(dscreen_core STATIC
   src/interior/plan.cpp
   src/interior/frame.cpp
   src/interior/ngx_params.cpp
+  src/interior/capture_name.cpp
   src/effects/sim/sim.cpp)
 target_link_libraries(dscreen_core PUBLIC dscreen_flags dscreen_trace PRIVATE dscreen_trace_flags)
 
@@ -102,7 +103,8 @@ add_executable(dscreen_tests
   tests/monitors_test.cpp
   tests/plan_test.cpp
   tests/frame_test.cpp
-  tests/simulation_test.cpp)
+  tests/simulation_test.cpp
+  tests/capture_name_test.cpp)
 target_link_libraries(dscreen_tests PRIVATE dscreen_core dscreen_trace_flags dscreen_stack)
 add_test(NAME properties_seed_1000 COMMAND dscreen_tests 1000)
 add_test(NAME properties_seed_2000 COMMAND dscreen_tests 2000)
