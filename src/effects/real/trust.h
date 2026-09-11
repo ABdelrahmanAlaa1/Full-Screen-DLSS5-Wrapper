@@ -16,9 +16,12 @@ struct TrustedFile
     ProductName product; // what the file calls its product, or nothing when it says: read once the file is held, so it is this file's
 };
 
+// Which of NVIDIA's files is being checked, which is what a refusal names.
+enum class ModelKind : std::uint8_t { NeuralRendering, SuperResolution };
+
 // Verifies the Authenticode signature and that the certificate names NVIDIA, and fails without both; only
 // then is the product name read, which is for the caller to judge. Revocation is not chased, which would
 // mean a network call on a path that has to work offline.
-[[nodiscard]] infra::Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path) noexcept;
+[[nodiscard]] infra::Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind kind) noexcept;
 
 } // namespace real

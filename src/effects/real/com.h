@@ -98,6 +98,9 @@ enum class ApiCall : std::uint8_t {
     OpenModelFile,
     ModelNotSigned,
     ModelNotFromNvidia,
+    OpenUpscalerFile, // the same three checks on nvngx_dlss.dll, which a refusal has to name instead
+    UpscalerNotSigned,
+    UpscalerNotFromNvidia,
     TextureDescriptionMismatch,
     PlanFrame,
     LoadOpticalFlow,

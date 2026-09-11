@@ -25,6 +25,22 @@ constexpr std::wstring_view kSigner = L"NVIDIA";
 constexpr std::size_t kNameCapacity = 256;
 constexpr std::size_t kKeyCapacity = 64;
 
+// Each check has a call for each of the files, so a refusal names the file it is about.
+[[nodiscard]] ApiCall OpenCall(ModelKind kind) noexcept
+{
+    return kind == ModelKind::NeuralRendering ? ApiCall::OpenModelFile : ApiCall::OpenUpscalerFile;
+}
+
+[[nodiscard]] ApiCall NotSignedCall(ModelKind kind) noexcept
+{
+    return kind == ModelKind::NeuralRendering ? ApiCall::ModelNotSigned : ApiCall::UpscalerNotSigned;
+}
+
+[[nodiscard]] ApiCall NotFromNvidiaCall(ModelKind kind) noexcept
+{
+    return kind == ModelKind::NeuralRendering ? ApiCall::ModelNotFromNvidia : ApiCall::UpscalerNotFromNvidia;
+}
+
 // One entry of a version resource's translation table: which language its strings are kept under.
 struct Translation
 {
@@ -81,17 +97,17 @@ struct Translation
 
 } // namespace
 
-Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path) noexcept
+Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind kind) noexcept
 {
     // Shared for reading only, so nothing else may write to the file, delete it or rename it while it is held.
-    static constexpr auto OpenForReading = [] [[nodiscard]] (const wchar_t* path) noexcept -> Result<UniqueHandle, Error> {
+    static constexpr auto OpenForReading = [] [[nodiscard]] (const wchar_t* path, ModelKind kind) noexcept -> Result<UniqueHandle, Error> {
         void* handle = ::CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (handle == INVALID_HANDLE_VALUE)
-            return Fail(LastError(ApiCall::OpenModelFile));
+            return Fail(LastError(OpenCall(kind)));
         return UniqueHandle(handle);
     };
 
-    static constexpr auto Verified = [] [[nodiscard]] (const wchar_t* path, void* handle) noexcept -> Status<Error> {
+    static constexpr auto Verified = [] [[nodiscard]] (const wchar_t* path, void* handle, ModelKind kind) noexcept -> Status<Error> {
         static constexpr auto FileInfoFor = [] [[nodiscard]] (const wchar_t* path, void* handle) noexcept -> WINTRUST_FILE_INFO {
             return WINTRUST_FILE_INFO{ .cbStruct = sizeof(WINTRUST_FILE_INFO), .pcwszFilePath = path, .hFile = handle, .pgKnownSubject = nullptr };
         };
@@ -115,9 +131,9 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path) noexcept
             return request;
         };
 
-        static constexpr auto Answered = [] [[nodiscard]] (WINTRUST_DATA & request) noexcept -> Status<Error> {
-            static constexpr auto SignedByNvidia = [] [[nodiscard]] (HANDLE state, LONG verdict) noexcept -> Status<Error> {
-                static constexpr auto FromNvidia = [] [[nodiscard]] (HANDLE state) noexcept -> Status<Error> {
+        static constexpr auto Answered = [] [[nodiscard]] (WINTRUST_DATA & request, ModelKind kind) noexcept -> Status<Error> {
+            static constexpr auto SignedByNvidia = [] [[nodiscard]] (HANDLE state, LONG verdict, ModelKind kind) noexcept -> Status<Error> {
+                static constexpr auto FromNvidia = [] [[nodiscard]] (HANDLE state, ModelKind kind) noexcept -> Status<Error> {
                     static constexpr auto NamesNvidia = [] [[nodiscard]] (HANDLE state) noexcept -> bool {
                         static constexpr auto SigningCertificate = [] [[nodiscard]] (HANDLE state) noexcept -> const CERT_CONTEXT* {
                             static constexpr auto SignerOf = [] [[nodiscard]] (CRYPT_PROVIDER_DATA * provider) noexcept -> CRYPT_PROVIDER_SGNR* {
@@ -143,12 +159,12 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path) noexcept
                         return std::wstring_view(name.data()).starts_with(kSigner);
                     };
                     if (!NamesNvidia(state))
-                        return Fail(Error{ ApiCall::ModelNotFromNvidia, 0 });
+                        return Fail(Error{ NotFromNvidiaCall(kind), 0 });
                     return {};
                 };
                 if (verdict != ERROR_SUCCESS)
-                    return Fail(Error{ ApiCall::ModelNotSigned, static_cast<std::uint32_t>(verdict) });
-                return FromNvidia(state);
+                    return Fail(Error{ NotSignedCall(kind), static_cast<std::uint32_t>(verdict) });
+                return FromNvidia(state, kind);
             };
 
             // The verification allocates state that has to be given back whatever the answer was.
@@ -157,17 +173,17 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path) noexcept
                 (void)::WinVerifyTrust(nullptr, &kVerifyAction, &request);
             };
             const LONG verdict = ::WinVerifyTrust(nullptr, &kVerifyAction, &request);
-            const Status<Error> answer = SignedByNvidia(request.hWVTStateData, verdict);
+            const Status<Error> answer = SignedByNvidia(request.hWVTStateData, verdict, kind);
             CloseVerification(request);
             return answer;
         };
         WINTRUST_FILE_INFO file = FileInfoFor(path, handle);
         WINTRUST_DATA request = RequestFor(&file); // WAIVER(R2): the call writes its state into the record it is given.
-        return Answered(request);
+        return Answered(request, kind);
     };
     // The product name is read only of a file that has passed, and says nothing about whether it passed.
-    return OpenForReading(path.CString()).and_then([&path](UniqueHandle handle) {
-        return Verified(path.CString(), handle.get()).transform([&path, &handle] { return TrustedFile{ std::move(handle), ProductNameOf(path.CString()) }; });
+    return OpenForReading(path.CString(), kind).and_then([&path, kind](UniqueHandle handle) {
+        return Verified(path.CString(), handle.get(), kind).transform([&path, &handle] { return TrustedFile{ std::move(handle), ProductNameOf(path.CString()) }; });
     });
 }
 

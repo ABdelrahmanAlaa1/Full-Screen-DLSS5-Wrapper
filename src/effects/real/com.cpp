@@ -86,14 +86,18 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::NgxParameterRoundTrip: return "an NGX parameter did not read back the value written";
     case ApiCall::WindowNotFound: return "no visible window has --window in its title";
     case ApiCall::OpenModelFile: return "opening nvngx_dlssnr.dll to check its signature";
-    case ApiCall::ModelNotSigned: return "nvngx_dlssnr.dll carries no signature Windows will trust";
-    case ApiCall::ModelNotFromNvidia: return "nvngx_dlssnr.dll is signed, but not by NVIDIA";
+    case ApiCall::ModelNotSigned: return "ERROR: nvngx_dlssnr.dll has no signature Windows trusts. It is not the correct file.";
+    case ApiCall::ModelNotFromNvidia: return "ERROR: nvngx_dlssnr.dll is signed, but not by NVIDIA. It is not the correct file.";
+    case ApiCall::OpenUpscalerFile: return "opening nvngx_dlss.dll to check its signature";
+    case ApiCall::UpscalerNotSigned: return "ERROR: nvngx_dlss.dll has no signature Windows trusts. It is not the correct file.";
+    case ApiCall::UpscalerNotFromNvidia: return "ERROR: nvngx_dlss.dll is signed, but not by NVIDIA. It is not the correct file.";
     case ApiCall::NgxNeuralRenderingUnavailable:
         return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
                "the loader's own account of why.";
     case ApiCall::NgxModelMissing:
         return "Error nvngx_dlssnr.dll is required but was not found.\n\n"
-               "Due to copyright, I cannot bundle with this program, you need to obtain it yourself. Just search the web for nvngx_dlssnr.dll and put it next to the exe.\n\nThe app will verify the signature of the dll before using it to ensure it's correct.";
+               "Due to copyright, I cannot bundle with this program, you need to obtain it yourself. Just search the web for nvngx_dlssnr.dll and put it next to the exe.\n\nThe app will verify the "
+               "signature of the dll before using it to ensure it's correct.";
     case ApiCall::NgxDriverTooOld: return "DLSS 5 Neural Rendering is not offered by this NVIDIA driver: its NGX loader has no DLSSNR.Available";
     case ApiCall::TextureDescriptionMismatch: return "a created texture does not match its description";
     case ApiCall::PlanFrame: return "frame planning";
@@ -138,8 +142,21 @@ ErrorText Describe(const Error& error) noexcept
                                                      interior::NvidiaDriverMajor(interior::kFirstNeuralRenderingDriver), interior::NvidiaDriverMinor(interior::kFirstNeuralRenderingDriver),
                                                      InstalledText(installed).Get());
     };
+    // A refused signature carries WinVerifyTrust's verdict as its code, which says whether there was a
+    // signature at all, one that no longer matches the file, or one Windows does not trust.
+    static constexpr auto SignatureText = [] [[nodiscard]] (std::string_view file, std::uint32_t verdict) noexcept -> ErrorText {
+        if (verdict == static_cast<std::uint32_t>(TRUST_E_NOSIGNATURE))
+            return infra::Formatted<ErrorText::Capacity>("ERROR: {} is not signed. It is not the correct file.", file);
+        if (verdict == static_cast<std::uint32_t>(TRUST_E_BAD_DIGEST))
+            return infra::Formatted<ErrorText::Capacity>("ERROR: {} is signed, but the signature does not match the file: it has been altered since it was signed. It is not the correct file.", file);
+        return infra::Formatted<ErrorText::Capacity>("ERROR: {} has a signature Windows does not trust (0x{:08X}). It is not the correct file.", file, verdict);
+    };
     if (error.call == ApiCall::NgxDriverTooOld)
         return DriverText(error.code);
+    if (error.call == ApiCall::ModelNotSigned)
+        return SignatureText("nvngx_dlssnr.dll", error.code);
+    if (error.call == ApiCall::UpscalerNotSigned)
+        return SignatureText("nvngx_dlss.dll", error.code);
     // No call fails with a code of zero, so a zero is an error that has said all it has to say.
     if (error.code == 0)
         return infra::Formatted<ErrorText::Capacity>("{}", Describe(error.call));
