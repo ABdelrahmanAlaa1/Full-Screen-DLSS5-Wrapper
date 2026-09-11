@@ -36,7 +36,7 @@ struct Compared
 
 // Saves what the frame just submitted holds: the original the first time, then the picture the frame's
 // combination made, named for its settings.
-[[nodiscard]] infra::Result<Compared, Error> CapturedComparison(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const Comparison& comparison) noexcept;
+[[nodiscard]] infra::Result<Compared, Error> CapturedComparison(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const Comparison& comparison, PngWriter& writer) noexcept;
 
 [[nodiscard]] bool IsComparisonDone(const Comparison& comparison) noexcept;
 [[nodiscard]] interior::SweepProgress ProgressOf(const Comparison& comparison) noexcept;

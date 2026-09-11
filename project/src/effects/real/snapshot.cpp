@@ -228,23 +228,23 @@ struct Overlaid
     std::optional<CursorOverlay> cursor;
 };
 
+[[nodiscard]] Result<Com<IWICFormatConverter>, Error> ConvertedOf(IWICImagingFactory* wic, const Com<IWICBitmap>& bitmap, const GUID& to) noexcept
+{
+    Com<IWICFormatConverter> converter; // WAIVER(R2): the answer of one call, read once after it.
+    return Check(wic->CreateFormatConverter(&converter), ApiCall::WicConvertPixels)
+        .and_then([&] { return Check(converter->Initialize(bitmap.Get(), to, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom), ApiCall::WicConvertPixels); })
+        .transform([&converter] { return converter; });
+}
+
 // The rows as copied become a WIC bitmap, converted to 32-bit blue, green and red with a spare byte and held
-// as pixels of its own so the cursor can be drawn on it, then converted to plain 24-bit colour and encoded
-// as PNG at the encoder's own compression, which is what "standard" means to it.
-[[nodiscard]] Status<Error> WritePng(IWICImagingFactory* wic, const Readback& readback, void* pixels, const Overlaid& overlaid, const interior::FilePath& path) noexcept
+// as pixels of its own, which the cursor is drawn on and which outlives the copy it came from.
+[[nodiscard]] Result<Com<IWICBitmap>, Error> HeldPicture(IWICImagingFactory* wic, const Readback& readback, void* pixels, const Overlaid& overlaid) noexcept
 {
     static constexpr auto BitmapOf = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& r, void* pixels, const GUID& format) noexcept -> Result<Com<IWICBitmap>, Error> {
         const D3D12_SUBRESOURCE_FOOTPRINT& f = r.layout.footprint.Footprint;
         Com<IWICBitmap> bitmap; // WAIVER(R2): the answer of one call, read once after it.
         return Check(wic->CreateBitmapFromMemory(f.Width, f.Height, format, f.RowPitch, static_cast<UINT>(r.layout.bytes), static_cast<BYTE*>(pixels), &bitmap), ApiCall::WicCreateBitmap)
             .transform([&bitmap] { return bitmap; });
-    };
-
-    static constexpr auto ConvertedOf = [] [[nodiscard]] (IWICImagingFactory * wic, const Com<IWICBitmap>& bitmap, const GUID& to) noexcept -> Result<Com<IWICFormatConverter>, Error> {
-        Com<IWICFormatConverter> converter; // WAIVER(R2): the answer of one call, read once after it.
-        return Check(wic->CreateFormatConverter(&converter), ApiCall::WicConvertPixels)
-            .and_then([&] { return Check(converter->Initialize(bitmap.Get(), to, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom), ApiCall::WicConvertPixels); })
-            .transform([&converter] { return converter; });
     };
 
     // The converted pixels, copied into a bitmap of their own, which is the one thing here that can be drawn on.
@@ -270,7 +270,35 @@ struct Overlaid
         Com<IWICBitmapLock> lock; // WAIVER(R2): the answer of one call, read once after it.
         return Check(held->Lock(&whole, WICBitmapLockWrite, &lock), ApiCall::WicCreateBitmap).and_then([&] { return DrawnOnLock(lock, r, overlaid); });
     };
+    return WicFormatOf(readback.layout.footprint.Footprint.Format).and_then([&](const GUID& format) {
+        return BitmapOf(wic, readback, pixels, format)
+            .and_then([&](const Com<IWICBitmap>& bitmap) { return ConvertedOf(wic, bitmap, GUID_WICPixelFormat32bppBGR); })
+            .and_then([&](const Com<IWICFormatConverter>& converted) { return HeldOf(wic, converted); })
+            .and_then([&](const Com<IWICBitmap>& held) { return Drawn(held, readback, overlaid).transform([&held] { return held; }); });
+    });
+}
 
+// The buffer is mapped for as long as the picture takes to hold, and unmapped whether or not it was held.
+[[nodiscard]] Result<Com<IWICBitmap>, Error> HeldOut(IWICImagingFactory* wic, const Readback& readback, const Overlaid& overlaid) noexcept
+{
+    static constexpr auto HeldThenUnmapped = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& readback, void* mapped, const Overlaid& overlaid) noexcept -> Result<Com<IWICBitmap>, Error> {
+        const Result<Com<IWICBitmap>, Error> held = HeldPicture(wic, readback, mapped, overlaid);
+        UnmapReadback(readback);
+        return held;
+    };
+    return MapReadback(readback).and_then([&](void* mapped) { return HeldThenUnmapped(wic, readback, mapped, overlaid); });
+}
+
+} // namespace
+
+Result<Com<IWICImagingFactory>, Error> MadeWicFactory() noexcept
+{
+    Com<IWICImagingFactory> factory; // WAIVER(R2): the answer of one call, read once after it.
+    return Check(::CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)), ApiCall::WicCreateFactory).transform([&factory] { return factory; });
+}
+
+Status<Error> WriteHeldPng(IWICImagingFactory* wic, const Com<IWICBitmap>& held, const interior::FilePath& path) noexcept
+{
     static constexpr auto StreamOf = [] [[nodiscard]] (IWICImagingFactory * wic, const interior::FilePath& path) noexcept -> Result<Com<IWICStream>, Error> {
         Com<IWICStream> stream; // WAIVER(R2): the answer of one call, read once after it.
         return Check(wic->CreateStream(&stream), ApiCall::WicOpenFile)
@@ -285,7 +313,7 @@ struct Overlaid
             .transform([&encoder] { return encoder; });
     };
 
-    static constexpr auto FrameWritten = [] [[nodiscard]] (const Com<IWICBitmapEncoder>& encoder, const Com<IWICFormatConverter>& picture, const Readback& r) noexcept -> Status<Error> {
+    static constexpr auto FrameWritten = [] [[nodiscard]] (const Com<IWICBitmapEncoder>& encoder, const Com<IWICFormatConverter>& picture, const Com<IWICBitmap>& held) noexcept -> Status<Error> {
         static constexpr auto FrameOf = [] [[nodiscard]] (const Com<IWICBitmapEncoder>& encoder) noexcept -> Result<Com<IWICBitmapFrameEncode>, Error> {
             Com<IWICBitmapFrameEncode> frame; // WAIVER(R2): the answers of one call, read once after it.
             Com<IPropertyBag2> options;
@@ -294,71 +322,48 @@ struct Overlaid
                 .transform([&frame] { return frame; });
         };
 
-        static constexpr auto Described = [] [[nodiscard]] (const Com<IWICBitmapFrameEncode>& frame, const Readback& r) noexcept -> Status<Error> {
+        static constexpr auto Described = [] [[nodiscard]] (const Com<IWICBitmapFrameEncode>& frame, const Com<IWICBitmap>& held) noexcept -> Status<Error> {
             WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR; // WAIVER(R2): the call may answer with the format it settled on.
-            return Check(frame->SetSize(r.layout.footprint.Footprint.Width, r.layout.footprint.Footprint.Height), ApiCall::WicWriteFrame).and_then([&] {
+            UINT width = 0;                                          // WAIVER(R2): the answers of one call, read once after it.
+            UINT height = 0;
+            return Check(held->GetSize(&width, &height), ApiCall::WicWriteFrame).and_then([&] { return Check(frame->SetSize(width, height), ApiCall::WicWriteFrame); }).and_then([&] {
                 return Check(frame->SetPixelFormat(&format), ApiCall::WicWriteFrame);
             });
         };
         return FrameOf(encoder).and_then([&](const Com<IWICBitmapFrameEncode>& frame) {
-            return Described(frame, r)
+            return Described(frame, held)
                 .and_then([&] { return Check(frame->WriteSource(picture.Get(), nullptr), ApiCall::WicWriteFrame); })
                 .and_then([&] { return Check(frame->Commit(), ApiCall::WicWriteFrame); })
                 .and_then([&] { return Check(encoder->Commit(), ApiCall::WicWriteFrame); });
         });
     };
-    static constexpr auto Written = [] [[nodiscard]] (IWICImagingFactory * wic, const Com<IWICFormatConverter>& picture, const Readback& r, const interior::FilePath& path) noexcept -> Status<Error> {
+    return ConvertedOf(wic, held, GUID_WICPixelFormat24bppBGR).and_then([&](const Com<IWICFormatConverter>& picture) {
         return StreamOf(wic, path).and_then(
-            [&](const Com<IWICStream>& stream) { return EncoderOf(wic, stream).and_then([&](const Com<IWICBitmapEncoder>& encoder) { return FrameWritten(encoder, picture, r); }); });
-    };
-    return WicFormatOf(readback.layout.footprint.Footprint.Format).and_then([&](const GUID& format) {
-        return BitmapOf(wic, readback, pixels, format)
-            .and_then([&](const Com<IWICBitmap>& bitmap) { return ConvertedOf(wic, bitmap, GUID_WICPixelFormat32bppBGR); })
-            .and_then([&](const Com<IWICFormatConverter>& converted) { return HeldOf(wic, converted); })
-            .and_then([&](const Com<IWICBitmap>& held) { return Drawn(held, readback, overlaid).and_then([&] { return ConvertedOf(wic, held, GUID_WICPixelFormat24bppBGR); }); })
-            .and_then([&](const Com<IWICFormatConverter>& picture) { return Written(wic, picture, readback, path); });
+            [&](const Com<IWICStream>& stream) { return EncoderOf(wic, stream).and_then([&](const Com<IWICBitmapEncoder>& encoder) { return FrameWritten(encoder, picture, held); }); });
     });
 }
 
-// The buffer is mapped for as long as the file takes, and unmapped whether or not the file was written.
-[[nodiscard]] Status<Error> WrittenOut(IWICImagingFactory* wic, const Readback& readback, const Overlaid& overlaid, const interior::FilePath& path) noexcept
-{
-    static constexpr auto WrittenThenUnmapped = [] [[nodiscard]] (IWICImagingFactory * wic, const Readback& readback, void* mapped, const Overlaid& overlaid,
-                                                                  const interior::FilePath& path) noexcept -> Status<Error> {
-        const Status<Error> written = WritePng(wic, readback, mapped, overlaid, path);
-        UnmapReadback(readback);
-        return written;
-    };
-    return MapReadback(readback).and_then([&](void* mapped) { return WrittenThenUnmapped(wic, readback, mapped, overlaid, path); });
-}
-
-[[nodiscard]] Result<Com<IWICImagingFactory>, Error> WicFactory() noexcept
-{
-    Com<IWICImagingFactory> factory; // WAIVER(R2): the answer of one call, read once after it.
-    return Check(::CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)), ApiCall::WicCreateFactory).transform([&factory] { return factory; });
-}
-
-} // namespace
-
-Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order, const std::optional<CursorOverlay>& cursor) noexcept
+Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order, const std::optional<CursorOverlay>& cursor,
+                                     PngWriter& writer) noexcept
 {
     // Both pictures are copied whichever are written: the cursor is placed by the original's size, and a copy
-    // costs nothing beside a file.
-    static constexpr auto WrittenWanted = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files, const std::optional<CursorOverlay>& cursor, Pictures pictures) noexcept -> Status<Error> {
-        static constexpr auto WrittenIf = [] [[nodiscard]] (bool wanted, IWICImagingFactory* wic, const Readback& readback, const Overlaid& overlaid,
-                                                            const interior::FilePath& path) noexcept -> Status<Error> {
+    // costs nothing beside a file. A picture held is handed to the writer, which writes it while the frame
+    // loop goes on.
+    static constexpr auto QueuedWanted = [] [[nodiscard]] (const Readbacks& r, const CaptureFiles& files, const std::optional<CursorOverlay>& cursor, Pictures pictures,
+                                                           PngWriter& writer) noexcept -> Status<Error> {
+        static constexpr auto QueuedIf = [] [[nodiscard]] (bool wanted, IWICImagingFactory* wic, const Readback& readback, const Overlaid& overlaid, const interior::FilePath& path,
+                                                           PngWriter& writer) noexcept -> Status<Error> {
             if (!wanted)
                 return {};
-            return WrittenOut(wic, readback, overlaid, path);
+            return HeldOut(wic, readback, overlaid).and_then([&](const Com<IWICBitmap>& held) { return writer.Submit(PngJob{ held, path }); });
         };
         const Overlaid overlaid{ SizeOf(r.original.layout), cursor };
-        return WicFactory().and_then([&](const Com<IWICImagingFactory>& wic) {
-            return WrittenIf(pictures != Pictures::Processed, wic.Get(), r.original, overlaid, files.original).and_then([&] {
-                return WrittenIf(pictures != Pictures::Original, wic.Get(), r.processed, overlaid, files.processed);
+        return MadeWicFactory().and_then([&](const Com<IWICImagingFactory>& wic) {
+            return QueuedIf(pictures != Pictures::Processed, wic.Get(), r.original, overlaid, files.original, writer).and_then([&] {
+                return QueuedIf(pictures != Pictures::Original, wic.Get(), r.processed, overlaid, files.processed, writer);
             });
         });
     };
-
     static constexpr auto StemOf = [] [[nodiscard]] (const SnapshotOrder& order) noexcept -> interior::CaptureStem {
         if (order.pictures == Pictures::Original)
             return interior::PlainStemOf(order.label, order.when);
@@ -366,7 +371,7 @@ Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, 
     };
     return EnsureCaptureFolder(order.folder).and_then([&] { return FreeCaptureNames(order.folder, StemOf(order), kOriginalSuffix, kProcessedSuffix); }).and_then([&](const CaptureFiles& files) {
         return CopiedBoth(gpu, frame, after).and_then([&](const Copied& copied) {
-            return WrittenWanted(copied.readbacks, files, cursor, order.pictures).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
+            return QueuedWanted(copied.readbacks, files, cursor, order.pictures, writer).transform([&] { return Snapshot{ files.original, files.processed, copied.fence }; });
         });
     });
 }

@@ -143,6 +143,7 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::MfCreateSample: return "making a video sample for the recording";
     case ApiCall::MfWriteSample: return "IMFSinkWriter::WriteSample";
     case ApiCall::MfFinalize: return "IMFSinkWriter::Finalize";
+    case ApiCall::PngWriteTimeout: return "the picture writer took longer than a minute over one picture, so it is taken to be stuck";
     }
     return "unknown call";
 }

@@ -70,8 +70,9 @@ and digits), the settings that shaped the picture, and the minute, as in
 `_skinstruc-N` is added when the mask is on and skin has a value of its own, `_nomask` when the mask is
 off, `_Intensity-N` when the intensity is under 100%, and `_Nx` when the model runs more than once a frame.
 **Always add all parameter values** adds `_automask`, the intensity and the passes whatever they are. A
-name already taken gets `_2`, `_3` and so on, the same count on both files. The frame loop stands still
-while the two files are written, so the picture pauses for as long as that takes.
+name already taken gets `_2`, `_3` and so on, the same count on both files. The files are written on a
+thread of their own, so the frame loop goes on while they are; at most three pictures wait to be written
+before the loop waits for room.
 
 The capture leaves the cursor out when the output covers the source, so the captures have no cursor
 either. **Include the mouse cursor**, off by default, draws it into both files where it was when the frame
@@ -87,8 +88,8 @@ every setting checked multiplies it. **Capture all combinations** writes the ori
 `_processed.png` per combination, every parameter in its name, into a folder of their own under the
 captures folder named for the source and the minute, as in `Desktop_multicapture_9-11--13-42`. No new
 frame is captured while it runs: each combination is run on the frame it started with, and the model is
-built again for each, which is what takes the time. The bar under the button fills as it goes, and
-clicking the button again stops it.
+built again for each, which is what takes the time; the files are written in the background meanwhile.
+The bar under the button fills as it goes, and clicking the button again stops it.
 
 **Record video** on the same page records the two pictures as two MP4 files, `_original.mp4` and
 `_processed.mp4`, named the same way, until it is clicked again; the time recorded so far runs beside it.

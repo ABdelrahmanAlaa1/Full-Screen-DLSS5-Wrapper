@@ -141,6 +141,7 @@ private:
     std::optional<VideoRecording> recording_; // WAIVER(R2): the recording under way, replaced whole as frames are added and cleared when it stops.
     std::optional<Comparison> comparison_;    // WAIVER(R2): the comparison capture under way, replaced whole as pictures are saved and cleared when it ends.
     std::optional<CursorOverlay> cursor_;     // WAIVER(R2): the cursor to draw into this frame's captures, replaced whole each frame.
+    std::unique_ptr<PngWriter> writer_;       // writes the captures' files on a thread of its own; held by pointer so the environment can be moved
     interior::Instant now_;                   // WAIVER(R2): this frame's clock reading, replaced whole per frame.
 };
 

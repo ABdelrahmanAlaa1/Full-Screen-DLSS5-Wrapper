@@ -1,6 +1,7 @@
 #pragma once
 #include "effects/real/cursor.h"
 #include "effects/real/executor.h"
+#include "effects/real/png_writer.h"
 #include "interior/capture_name.h"
 
 #include <optional>
@@ -76,12 +77,19 @@ struct Snapshot
 [[nodiscard]] infra::Result<void*, Error> MapReadback(const Readback& readback) noexcept;
 void UnmapReadback(const Readback& readback) noexcept;
 
+// The factory every WIC object here is made from. A thread makes its own.
+[[nodiscard]] infra::Result<Com<IWICImagingFactory>, Error> MadeWicFactory() noexcept;
+
+// Writes a picture held as 32-bit blue, green, red and a spare byte as a PNG file of plain 24-bit colour,
+// at the encoder's own compression, which is what "standard" means to it.
+[[nodiscard]] infra::Status<Error> WriteHeldPng(IWICImagingFactory* wic, const Com<IWICBitmap>& held, const interior::FilePath& path) noexcept;
+
 // Copies the picture the model was given and the picture shown for it out of the GPU, as the frame just
-// submitted left them, and writes the ones asked for as PNG files named for the settings and the moment; an
-// original written alone is named for the source and the moment, since no setting shaped it. Waits for the
-// copies and for the files, so the frame loop stands still for as long as that takes. The cursor, when there
-// is one to draw, goes into the pictures before they are written.
+// submitted left them, and hands the ones asked for to the writer as PNG files named for the settings and
+// the moment; an original written alone is named for the source and the moment, since no setting shaped it.
+// Waits for the copies, and for the writer only when it is that far behind. The cursor, when there is one
+// to draw, goes into the pictures before they are handed over.
 [[nodiscard]] infra::Result<Snapshot, Error> SaveSnapshot(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const SnapshotOrder& order,
-                                                          const std::optional<CursorOverlay>& cursor) noexcept;
+                                                          const std::optional<CursorOverlay>& cursor, PngWriter& writer) noexcept;
 
 } // namespace real

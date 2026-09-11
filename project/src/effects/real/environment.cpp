@@ -212,7 +212,7 @@ RealEnvironment::RealEnvironment(Gpu gpu, const SessionPlan& plan, OutputWindow 
     : gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
       frame_{ interior::FrameNumberTag::Parse(0), *kZeroSlot, *kZeroSet, false, fence }, stats_{ start, 0, 0 }, applied_(settings), clearedDepth_(plan.depth), restartWanted_(false), resized_(false),
       pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt), recording_(std::nullopt),
-      comparison_(std::nullopt), cursor_(std::nullopt), now_(start)
+      comparison_(std::nullopt), cursor_(std::nullopt), writer_(std::make_unique<PngWriter>()), now_(start)
 {
 }
 
@@ -742,11 +742,12 @@ Status<Error> RealEnvironment::EndedComparison(std::string_view what) noexcept
     return NotedComparison(console_, what, ended, now_);
 }
 
+// Done means on disk: the writer is drained before the log says so.
 Status<Error> RealEnvironment::FinishedComparison() noexcept
 {
     if (!comparison_.has_value() || !IsComparisonDone(*comparison_))
         return {};
-    return EndedComparison("comparison capture done");
+    return writer_->Drain().and_then([this] { return EndedComparison("comparison capture done"); });
 }
 
 void RealEnvironment::ShowComparison(const PanelReading& reading) noexcept
@@ -784,7 +785,7 @@ Status<Error> RealEnvironment::StoppedRecording() noexcept
 
 Status<Error> RealEnvironment::Finished() noexcept
 {
-    return StoppedRecording().and_then([this] { return EndedComparison("comparison capture ended with the session"); });
+    return StoppedRecording().and_then([this] { return EndedComparison("comparison capture ended with the session"); }).and_then([this] { return writer_->Drain(); });
 }
 
 Status<Error> RealEnvironment::DrainedRecording(interior::FrameSlot slot) noexcept
@@ -852,10 +853,10 @@ Result<ExecutionReport, Error> RealEnvironment::Captured(const interior::FramePl
 {
     if (!snapshot_.has_value())
         return report;
-    return SaveSnapshot(gpu_, frame_, plan.next, *snapshot_, cursor_).and_then([this, &report](const Snapshot& s) {
+    return SaveSnapshot(gpu_, frame_, plan.next, *snapshot_, cursor_, *writer_).and_then([this, &report](const Snapshot& s) {
         frame_ = WithFence(frame_, s.fence); // WAIVER(R2): the last signalled fence, replaced whole.
         snapshot_ = std::nullopt;            // WAIVER(R2): the order was taken, so nothing waits.
-        return NotedFiles(console_, "screenshot saved", CaptureFiles{ s.original, s.processed }).transform([&] { return ExecutionReport{ s.fence, report.stepsExecuted }; });
+        return NotedFiles(console_, "screenshot writing", CaptureFiles{ s.original, s.processed }).transform([&] { return ExecutionReport{ s.fence, report.stepsExecuted }; });
     });
 }
 
@@ -863,7 +864,7 @@ Result<ExecutionReport, Error> RealEnvironment::ComparedFrame(const interior::Fr
 {
     if (!comparison_.has_value())
         return report;
-    return CapturedComparison(gpu_, frame_, plan.next, *comparison_).and_then([this, &report](const Compared& c) {
+    return CapturedComparison(gpu_, frame_, plan.next, *comparison_, *writer_).and_then([this, &report](const Compared& c) {
         comparison_ = c.comparison;          // WAIVER(R2): the comparison under way, replaced whole as pictures are saved.
         frame_ = WithFence(frame_, c.fence); // WAIVER(R2): the last signalled fence, replaced whole.
         return FinishedComparison().transform([&] { return ExecutionReport{ c.fence, report.stepsExecuted }; });

@@ -144,6 +144,7 @@ enum class ApiCall : std::uint8_t {
     MfCreateSample,
     MfWriteSample,
     MfFinalize,
+    PngWriteTimeout,
 };
 
 struct Error

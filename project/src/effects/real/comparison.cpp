@@ -40,14 +40,14 @@ std::optional<interior::LiveSettings> ComparisonControls(const Comparison& c) no
     return interior::SweepCombination(c.base.live, c.spec, c.done);
 }
 
-Result<Compared, Error> CapturedComparison(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const Comparison& c) noexcept
+Result<Compared, Error> CapturedComparison(const Gpu& gpu, const FrameContext& frame, const interior::FrameState& after, const Comparison& c, PngWriter& writer) noexcept
 {
     if (!c.originalSaved)
-        return SaveSnapshot(gpu, frame, after, OrderFor(c, c.base.live, Pictures::Original), c.cursor).transform([&](const Snapshot& s) { return Compared{ WithOriginalSaved(c), s.fence }; });
+        return SaveSnapshot(gpu, frame, after, OrderFor(c, c.base.live, Pictures::Original), c.cursor, writer).transform([&](const Snapshot& s) { return Compared{ WithOriginalSaved(c), s.fence }; });
     if (IsComparisonDone(c))
         return Compared{ c, frame.fence };
     const interior::LiveSettings live = interior::SweepCombination(c.base.live, c.spec, c.done);
-    return SaveSnapshot(gpu, frame, after, OrderFor(c, live, Pictures::Processed), c.cursor).transform([&](const Snapshot& s) { return Compared{ WithOneMore(c), s.fence }; });
+    return SaveSnapshot(gpu, frame, after, OrderFor(c, live, Pictures::Processed), c.cursor, writer).transform([&](const Snapshot& s) { return Compared{ WithOneMore(c), s.fence }; });
 }
 
 bool IsComparisonDone(const Comparison& c) noexcept
