@@ -19,7 +19,7 @@ std::string_view UsageText() noexcept
            "  --target N                 Present on monitor N instead of the source monitor (enables upscaling)\n"
            "  --cursor auto|on|off       Include the cursor in the capture (auto: only when --target differs)\n"
            "  --capture-border on|off    Let Windows draw its capture border (default off)\n"
-           "  --vsync on|off             Present synchronised to the display (default on)\n"
+           "  --vsync on|off             Present synchronised to the display (default off)\n"
            "  --compare off|split|original\n"
            "                             Comparison view: split screen or the untouched capture\n"
            "  --format rgba8|rgba16f     Model colour format (default rgba8)\n"

@@ -376,7 +376,7 @@ Options DefaultOptions() noexcept
         std::nullopt,
         *kDefaultThreshold,
         CursorMode::Auto,
-        true,
+        false,
         CompareMode::Off,
         ColorFormat::Rgba8,
         false,
