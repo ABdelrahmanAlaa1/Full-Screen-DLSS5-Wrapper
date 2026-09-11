@@ -2,9 +2,14 @@
 
 #include <softpub.h>
 #include <wintrust.h>
+#include <winver.h>
 
 #include <array>
+#include <cstring>
+#include <cwchar>
+#include <optional>
 #include <string_view>
+#include <vector>
 
 namespace real {
 namespace {
@@ -18,6 +23,61 @@ using infra::Status;
 GUID kVerifyAction = WINTRUST_ACTION_GENERIC_VERIFY_V2; // WAIVER(R2): a constant the API insists on being handed by non-const pointer.
 constexpr std::wstring_view kSigner = L"NVIDIA";
 constexpr std::size_t kNameCapacity = 256;
+constexpr std::size_t kKeyCapacity = 64;
+
+// One entry of a version resource's translation table: which language its strings are kept under.
+struct Translation
+{
+    WORD language;
+    WORD codePage;
+};
+
+// What the file's version resource calls its product. Read by path once the file is held, which is safe
+// because the handle's share mode keeps the file from being written, deleted or renamed under the path.
+[[nodiscard]] ProductName ProductNameOf(const wchar_t* path) noexcept
+{
+    static constexpr auto VersionBlock = [] [[nodiscard]] (const wchar_t* path) noexcept -> std::vector<std::byte> {
+        DWORD ignored = 0; // WAIVER(R2): an out-parameter the API insists on, which it always sets to zero.
+        const DWORD size = ::GetFileVersionInfoSizeW(path, &ignored);
+        if (size == 0)
+            return {};
+        std::vector<std::byte> block(size); // WAIVER(R2): a buffer the API fills once, before use.
+        if (::GetFileVersionInfoW(path, 0, size, block.data()) == FALSE)
+            return {};
+        return block;
+    };
+
+    // The strings are kept per language; the first language listed is the one asked.
+    static constexpr auto FirstTranslation = [] [[nodiscard]] (const std::vector<std::byte>& block) noexcept -> std::optional<Translation> {
+        void* found = nullptr; // WAIVER(R2): the answer of one query, read once after it.
+        UINT length = 0;
+        if (block.empty() || ::VerQueryValueW(block.data(), L"\\VarFileInfo\\Translation", &found, &length) == FALSE || length < sizeof(Translation))
+            return std::nullopt;
+        Translation first{ 0, 0 }; // WAIVER(R2): copied out of the block, whose alignment is the API's to promise.
+        std::memcpy(&first, found, sizeof(Translation));
+        return first;
+    };
+
+    static constexpr auto NamedProduct = [] [[nodiscard]] (const std::vector<std::byte>& block, const Translation& translation) noexcept -> ProductName {
+        static constexpr auto KeyOf = [] [[nodiscard]] (const Translation& translation) noexcept -> std::array<wchar_t, kKeyCapacity> {
+            std::array<wchar_t, kKeyCapacity> key{}; // WAIVER(R2): a local buffer filled once, before use.
+            (void)::_snwprintf_s(key.data(), key.size(), _TRUNCATE, L"\\StringFileInfo\\%04x%04x\\ProductName", static_cast<unsigned int>(translation.language),
+                                 static_cast<unsigned int>(translation.codePage));
+            return key;
+        };
+        void* found = nullptr; // WAIVER(R2): the answer of one query, read once after it.
+        UINT length = 0;
+        if (::VerQueryValueW(block.data(), KeyOf(translation).data(), &found, &length) == FALSE || length == 0)
+            return ProductName{};
+        const wchar_t* text = static_cast<const wchar_t*>(found);
+        return ProductName::Parse(std::wstring_view(text, ::wcsnlen(text, length))).value_or(ProductName{});
+    };
+    const std::vector<std::byte> block = VersionBlock(path);
+    const std::optional<Translation> translation = FirstTranslation(block);
+    if (!translation.has_value())
+        return ProductName{};
+    return NamedProduct(block, *translation);
+}
 
 } // namespace
 
@@ -105,7 +165,10 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path) noexcept
         WINTRUST_DATA request = RequestFor(&file); // WAIVER(R2): the call writes its state into the record it is given.
         return Answered(request);
     };
-    return OpenForReading(path.CString()).and_then([&path](UniqueHandle handle) { return Verified(path.CString(), handle.get()).transform([&handle] { return TrustedFile{ std::move(handle) }; }); });
+    // The product name is read only of a file that has passed, and says nothing about whether it passed.
+    return OpenForReading(path.CString()).and_then([&path](UniqueHandle handle) {
+        return Verified(path.CString(), handle.get()).transform([&path, &handle] { return TrustedFile{ std::move(handle), ProductNameOf(path.CString()) }; });
+    });
 }
 
 } // namespace real

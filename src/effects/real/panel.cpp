@@ -129,28 +129,43 @@ struct ToggleSpec
 {
     const wchar_t* label;
     const wchar_t* hint;
-    bool resettable; // a switch whose default is not obvious from the switch itself
+    bool resettable;        // a switch whose default is not obvious from the switch itself
+    const wchar_t* warning; // what a glyph before the switch warns of, when the session says it applies, or nothing
 };
 
+// The model file passed the signature check, or the session would have stopped; this is about what it says it is.
+constexpr wchar_t kModelMisnamed[] = L"nvngx_dlssnr.dll is signed by NVIDIA, but does not call its product \"NVIDIA DLSSNR\".\n"
+                                     L"It may be another of NVIDIA's files under the model's name, or a later model.\n"
+                                     L"It is used anyway; the log says what it calls itself.";
+
 constexpr std::array<ToggleSpec, kToggleCount> kToggles{ {
-    { L"Enable the model", L"Whether the model runs at all. Off costs nothing and shows the captured picture as it was.", false },
-    { L"Auto mask", L"Let the model find skin itself. Skin structure and local structure do nothing while this is off.", true },
+    { L"Enable the model", L"Whether the model runs at all. Off costs nothing and shows the captured picture as it was.", false, kModelMisnamed },
+    { L"Auto mask", L"Let the model find skin itself. Skin structure and local structure do nothing while this is off.", true, nullptr },
     { L"Skin follows local structure",
       L"Give skin whatever local structure is given, which is what the model reads -1 as. It is the only value between -1 and 0 that means anything, so it is a switch rather than part of the slider.",
-      true },
-    { L"UI correction", L"Ask the model to leave interface pixels alone. The model reads this from a UI layer this app never binds, so it does nothing either way.", true },
-    { L"Depth is inverted", L"Tell the model the depth plane counts the other way. The plane is one constant, and a constant read backwards is the same constant, so this does nothing.", true },
-    { L"Vsync", L"Present in step with the monitor. Off presents as fast as the pipeline allows, which tears.", true },
-    { L"Capture border", L"Let Windows draw its yellow border around what is being captured.", true },
-    { L"Always on top", L"Keep the output window above every other window.", true },
-    { L"Redirection surface", L"Give the output window a GDI surface. Diagnostic; fixed when the window is made.", true },
+      true, nullptr },
+    { L"UI correction", L"Ask the model to leave interface pixels alone. The model reads this from a UI layer this app never binds, so it does nothing either way.", true, nullptr },
+    { L"Depth is inverted", L"Tell the model the depth plane counts the other way. The plane is one constant, and a constant read backwards is the same constant, so this does nothing.", true,
+      nullptr },
+    { L"Vsync", L"Present in step with the monitor. Off presents as fast as the pipeline allows, which tears.", true, nullptr },
+    { L"Capture border", L"Let Windows draw its yellow border around what is being captured.", true, nullptr },
+    { L"Always on top", L"Keep the output window above every other window.", true, nullptr },
+    { L"Redirection surface", L"Give the output window a GDI surface. Diagnostic; fixed when the window is made.", true, nullptr },
     { L"Direct3D debug layer",
       L"Turn on the Direct3D 12 validation layer. Slow, and only useful when chasing a fault. Windows turns it on for the whole program and will not turn it off, so turning it off here starts the "
       L"program again.",
-      true },
-    { L"Model indicator", L"Let the model draw its own overlay naming its version, the preset it resolved and its working size. Read as the model loads, so it may need the program restarted.", true },
-    { L"Model kernel cache", L"Let the model cache its compiled kernels. Off makes it rebuild them every run. Read as the model loads, so it may need the program restarted.", true },
+      true, nullptr },
+    { L"Model indicator", L"Let the model draw its own overlay naming its version, the preset it resolved and its working size. Read as the model loads, so it may need the program restarted.", true,
+      nullptr },
+    { L"Model kernel cache", L"Let the model cache its compiled kernels. Off makes it rebuild them every run. Read as the model loads, so it may need the program restarted.", true, nullptr },
 } };
+
+// Whether a switch's warning applies. The only switch that carries one is the model's, and what it warns of
+// is the model file calling itself something else, which the session settled before the panel was built.
+[[nodiscard]] bool ToggleWarns(std::size_t toggle, const PanelFindings& findings) noexcept
+{
+    return kToggles[toggle].warning != nullptr && !findings.modelAsNamed;
+}
 
 struct GroupSpec
 {
@@ -185,7 +200,7 @@ constexpr std::array<GroupSpec, kGroupCount> kGroups{ {
 
 // Whether a group's warning applies. The only group that carries one is super resolution, and what it
 // warns of is the model being absent, which the session settled before the panel was built.
-[[nodiscard]] bool Warns(std::size_t group, const PanelFindings& findings) noexcept
+[[nodiscard]] bool GroupWarns(std::size_t group, const PanelFindings& findings) noexcept
 {
     return kGroups[group].warning != nullptr && !findings.superResolution;
 }
@@ -855,6 +870,7 @@ struct Built
     std::array<HWND, kFieldCount> warnings;
     std::array<HWND, kToggleCount> toggles;
     std::array<HWND, kToggleCount> toggleResets;
+    std::array<HWND, kToggleCount> toggleWarnings;
     std::array<HWND, kGroupCount> groupLabels;
     std::array<HWND, kGroupCount> groupWarnings;
     std::array<std::array<HWND, kMaxChoices>, kGroupCount> choices;
@@ -1072,8 +1088,8 @@ void ShowOnly(const ControlPanel& panel, Page chosen) noexcept
                 };
 
                 static constexpr auto ShowNumberOrSwitch = [](const ControlPanel& panel, const RowSpec& row, int how) noexcept -> void {
-                    static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 2> {
-                        return { panel.toggles[t], panel.toggleResets[t] };
+                    static constexpr auto ControlsOfToggle = [] [[nodiscard]] (const ControlPanel& panel, std::size_t t) noexcept -> std::array<HWND, 3> {
+                        return { panel.toggles[t], panel.toggleResets[t], panel.toggleWarnings[t] };
                     };
                     if (row.kind == Kind::Field)
                         ShowAll(ControlsOfField(panel, row.index), how);
@@ -1657,13 +1673,25 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     return built;
                 };
 
-                static constexpr auto BuildToggles = [] [[nodiscard]] (HWND parent, const Metrics& m, const std::array<bool, kToggleCount>& on, Built built) noexcept -> Built {
-                    static constexpr auto CreateToggle = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t toggle, bool on) noexcept -> HWND {
+                static constexpr auto BuildToggles = [] [[nodiscard]] (HWND parent, const Metrics& m, const std::array<bool, kToggleCount>& on, const PanelFindings& findings,
+                                                                       Built built) noexcept -> Built {
+                    // A switch whose warning applies wears the glyph in front of its box, and the box starts after it.
+                    static constexpr auto ToggleInset = [] [[nodiscard]] (std::size_t t, const PanelFindings& findings) noexcept -> int { return ToggleWarns(t, findings) ? kWarningWidth : 0; };
+
+                    static constexpr auto CreateToggle = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t toggle, bool on, const PanelFindings& findings) noexcept -> HWND {
                         const Placement at = PlaceOfRow(Kind::Toggle, toggle, m);
-                        const HWND check = CreateButton(parent, m, kToggles[toggle].label, BS_AUTOCHECKBOX, at.left, at.control, kResetOffset - kMargin);
+                        const HWND check = CreateButton(parent, m, kToggles[toggle].label, BS_AUTOCHECKBOX, at.left + ToggleInset(toggle, findings), at.control,
+                                                        kResetOffset - kMargin - ToggleInset(toggle, findings));
                         if (check != nullptr)
                             SetChecked(check, on);
                         return check;
+                    };
+
+                    static constexpr auto CreateToggleWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t t, const PanelFindings& findings) noexcept -> HWND {
+                        if (!ToggleWarns(t, findings))
+                            return nullptr;
+                        const Placement at = PlaceOfRow(Kind::Toggle, t, m);
+                        return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_CENTERIMAGE | SS_NOTIFY, 0, Bounds(m, at.left, at.control, kWarningWidth - 4, m.ControlHeight()));
                     };
 
                     // A switch is its own answer, so only one whose default is not obvious from looking at it gets a reset.
@@ -1673,8 +1701,9 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                         const Placement at = PlaceOfRow(Kind::Toggle, toggle, m);
                         return CreateButton(parent, m, kRefreshGlyph, 0, at.left + kResetOffset, at.control, kResetWidth);
                     };
-                    built.toggles = infra::Generated<HWND, kToggleCount>([&](std::size_t t) { return CreateToggle(parent, m, t, on[t]); });
+                    built.toggles = infra::Generated<HWND, kToggleCount>([&](std::size_t t) { return CreateToggle(parent, m, t, on[t], findings); });
                     built.toggleResets = infra::Generated<HWND, kToggleCount>([&](std::size_t t) { return CreateToggleReset(parent, m, t); });
+                    built.toggleWarnings = infra::Generated<HWND, kToggleCount>([&](std::size_t t) { return CreateToggleWarning(parent, m, t, findings); });
                     return built;
                 };
 
@@ -1699,10 +1728,10 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     };
                     // A group whose warning applies wears the glyph in front of its label, and the label starts after it; one
                     // whose warning does not apply has no glyph, and its label starts where every other label does.
-                    static constexpr auto GroupInset = [] [[nodiscard]] (std::size_t g, const PanelFindings& findings) noexcept -> int { return Warns(g, findings) ? kWarningWidth : 0; };
+                    static constexpr auto GroupInset = [] [[nodiscard]] (std::size_t g, const PanelFindings& findings) noexcept -> int { return GroupWarns(g, findings) ? kWarningWidth : 0; };
 
                     static constexpr auto CreateGroupWarning = [] [[nodiscard]] (HWND parent, const Metrics& m, std::size_t g, const PanelFindings& findings) noexcept -> HWND {
-                        if (!Warns(g, findings))
+                        if (!GroupWarns(g, findings))
                             return nullptr;
                         const Placement at = PlaceOfRow(Kind::Group, g, m);
                         return CreateChild(parent, WC_STATICW, kWarningGlyph, SS_CENTER | SS_CENTERIMAGE | SS_NOTIFY, 0, Bounds(m, at.left, at.top, kWarningWidth - 4, m.LabelHeight()));
@@ -1818,7 +1847,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     built.frames = infra::Generated<HWND, kFrameCount>([&](std::size_t f) { return CreateFrame(parent, m, f); });
                     return built;
                 };
-                const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), BuildFields(parent, m, StartingValues(o, live), Built{}));
+                const Built numbers = BuildToggles(parent, m, StartingToggles(o, live), findings, BuildFields(parent, m, StartingValues(o, live), Built{}));
                 const Built rows = BuildLists(parent, m, BuildPicks(parent, m, findings, BuildGroups(parent, m, StartingChoices(o, display), findings, numbers)));
                 return BuildFrames(parent, m, rows);
             };
@@ -1869,6 +1898,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                                  built.warnings,
                                  built.toggles,
                                  built.toggleResets,
+                                 built.toggleWarnings,
                                  built.groupLabels,
                                  built.groupWarnings,
                                  built.choices,
@@ -1958,8 +1988,13 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     };
 
                     static constexpr auto HintChoices = [](const ControlPanel& panel, HWND parent) noexcept -> void {
+                        static constexpr auto HintToggleWarning = [](const ControlPanel& panel, HWND parent, std::size_t t) noexcept -> void {
+                            if (panel.toggleWarnings[t] != nullptr)
+                                AddHint(panel.tooltip, parent, panel.toggleWarnings[t], kToggles[t].warning);
+                        };
                         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kToggleCount),
                                               [&panel, parent](std::size_t t) { AddHint(panel.tooltip, parent, panel.toggles[t], kToggles[t].hint); });
+                        std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kToggleCount), [&panel, parent](std::size_t t) { HintToggleWarning(panel, parent, t); });
                         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kGroupCount),
                                               [&panel, parent](std::size_t g) { AddHint(panel.tooltip, parent, panel.groupLabels[g], kGroups[g].hint); });
                         std::ranges::for_each(std::views::iota(std::size_t{ 0 }, kPickCount), [&panel, parent](std::size_t t) { AddHint(panel.tooltip, parent, panel.crosshairs[t], kPicks[t].hint); });
@@ -2001,6 +2036,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                     std::ranges::for_each(panel.pickResets, [&panel](HWND button) { WearIcon(panel, button); });
                     std::ranges::for_each(panel.warnings, [&panel](HWND glyph) { WearIcon(panel, glyph); });
                     std::ranges::for_each(panel.groupWarnings, [&panel](HWND glyph) { WearIcon(panel, glyph); });
+                    std::ranges::for_each(panel.toggleWarnings, [&panel](HWND glyph) { WearIcon(panel, glyph); });
                     WearIcon(panel, panel.expander);
                     (void)::SendMessageW(panel.notice, WM_SETFONT, reinterpret_cast<WPARAM>(panel.boldFont.get()), TRUE);
                 };

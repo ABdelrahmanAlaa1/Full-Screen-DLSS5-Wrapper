@@ -148,6 +148,12 @@ struct Devices
     return d.runtime.has_value() && real::OffersSuperResolution(*d.runtime);
 }
 
+// Whether the model file calls itself what the model is called. With no file of ours in play there is nothing to doubt.
+[[nodiscard]] bool ModelAsNamed(const Devices& d) noexcept
+{
+    return !d.model.has_value() || d.model->product.Get() == real::kNeuralRenderingProduct;
+}
+
 [[nodiscard]] bool OverlapsSource(const Options& o, const Geometry& g) noexcept
 {
     return interior::IsSameRect(g.sourceRect, g.targetRect) || o.source.kind == interior::MonitorSelectionKind::All;
@@ -437,32 +443,48 @@ struct Ended
             // A model is a DLL the loader picks up by name from a folder anyone may write to, so what is found there
             // is checked and then held open for the life of the session. A missing file is left to the loader, which
             // says so better: neural rendering stops without one, and super resolution has the driver's own copy.
-            static constexpr auto TrustedModel = [] [[nodiscard]] (const Console& console, const std::optional<interior::FilePath>& file,
-                                                                   std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
-                static constexpr auto Checked = [] [[nodiscard]] (const Console& console, const interior::FilePath& file,
-                                                                  std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
-                    return real::OpenTrusted(file).and_then([&console, name](real::TrustedFile model) {
-                        return Log(console, LogLevel::Info, infra::Formatted<kLineCapacity>("{} is signed by NVIDIA", name).Get()).transform([&model] {
-                            return std::optional<real::TrustedFile>{ std::move(model) };
-                        });
+            static constexpr auto TrustedModel = [] [[nodiscard]] (const Console& console, const std::optional<interior::FilePath>& file, std::string_view name,
+                                                                   std::optional<std::wstring_view> product) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
+                // A file that passed the signature check is used whatever it calls itself; what it calls itself is said,
+                // and said as a warning when it is not what was expected, since it may then be some other file of NVIDIA's.
+                static constexpr auto Reported = [] [[nodiscard]] (const Console& console, const real::TrustedFile& model, std::string_view name,
+                                                                   std::optional<std::wstring_view> product) noexcept -> Status<Error> {
+                    static constexpr auto Warned = [] [[nodiscard]] (const Console& console, std::string_view name, const char* called, std::wstring_view wanted) noexcept -> Status<Error> {
+                        const std::array<char, real::ProductName::Capacity + 1> expected = infra::NarrowedChars<real::ProductName::Capacity + 1>(wanted);
+                        return Log(console, LogLevel::Warn,
+                                   infra::Formatted<kLineCapacity>("{} is signed by NVIDIA but calls its product '{}' rather than '{}', so it may not be the DLSS 5 model; it is used anyway", name,
+                                                                   called, expected.data())
+                                       .Get());
+                    };
+                    const std::array<char, real::ProductName::Capacity + 1> called = infra::NarrowedChars<real::ProductName::Capacity + 1>(model.product.Get());
+                    if (product.has_value() && model.product.Get() != *product)
+                        return Warned(console, name, called.data(), *product);
+                    return Log(console, LogLevel::Info, infra::Formatted<kLineCapacity>("{} is signed by NVIDIA and calls its product '{}'", name, called.data()).Get());
+                };
+
+                static constexpr auto Checked = [] [[nodiscard]] (const Console& console, const interior::FilePath& file, std::string_view name,
+                                                                  std::optional<std::wstring_view> product) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
+                    return real::OpenTrusted(file).and_then([&console, name, product](real::TrustedFile model) {
+                        return Reported(console, model, name, product).transform([&model] { return std::optional<real::TrustedFile>{ std::move(model) }; });
                     });
                 };
                 if (!file.has_value())
                     return std::optional<real::TrustedFile>{};
-                return Checked(console, *file, name);
+                return Checked(console, *file, name, product);
             };
 
             static constexpr auto ModelToCheck = [] [[nodiscard]] (const std::optional<interior::FilePath>& found, bool wanted) noexcept -> std::optional<interior::FilePath> {
                 return wanted ? found : std::nullopt;
             };
             const bool wantsSr = interior::WantsSuperResolution(b.options, b.geometry.sourceExtent, b.geometry.targetExtent);
-            return TrustedModel(console, ModelToCheck(real::NeuralRenderingModelFile(settings), wantsNgx && b.options.neuralRendering), "nvngx_dlssnr.dll")
+            return TrustedModel(console, ModelToCheck(real::NeuralRenderingModelFile(settings), wantsNgx && b.options.neuralRendering), "nvngx_dlssnr.dll", real::kNeuralRenderingProduct)
                 .and_then([&](std::optional<real::TrustedFile> model) {
-                    return TrustedModel(console, ModelToCheck(real::SuperResolutionModelFile(settings), wantsSr), "nvngx_dlss.dll").and_then([&](std::optional<real::TrustedFile> upscaler) {
-                        return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
-                            return Devices{ std::move(device), std::move(runtime), std::move(model), std::move(upscaler) };
+                    return TrustedModel(console, ModelToCheck(real::SuperResolutionModelFile(settings), wantsSr), "nvngx_dlss.dll", std::nullopt)
+                        .and_then([&](std::optional<real::TrustedFile> upscaler) {
+                            return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
+                                return Devices{ std::move(device), std::move(runtime), std::move(model), std::move(upscaler) };
+                            });
                         });
-                    });
                 });
         };
         const bool wantsNgx = WantsNgx(b.options, b.geometry);
@@ -607,6 +629,7 @@ struct Ended
             return real::PanelFindings{ .lists = ListsFor(b, real::UsableAdapters(d.device.factory.Get()), OfferedPresets(d)),
                                         .superResolution = OffersSuperResolution(d),
                                         .opticalFlow = kHasOpticalFlow,
+                                        .modelAsNamed = ModelAsNamed(d),
                                         .window = FollowedWindow(b) };
         };
 

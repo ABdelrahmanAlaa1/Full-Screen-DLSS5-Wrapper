@@ -81,6 +81,7 @@ struct PanelFindings
     PanelLists lists;
     bool superResolution;                          // whether the driver offers it at all; without it the choice is shown but greyed
     bool opticalFlow;                              // whether this build carries the NVIDIA Optical Flow backend; without it that choice is shown but greyed
+    bool modelAsNamed;                             // whether nvngx_dlssnr.dll calls its product what the model is called; without that it runs, under a warning
     std::optional<interior::MonitorHandle> window; // the window this session is working on, when it is working on one
 };
 
@@ -102,6 +103,7 @@ struct ControlPanel
     std::array<HWND, kFieldCount> warnings; // a glyph at the end of a label whose number wants a word of caution, or nothing
     std::array<HWND, kToggleCount> toggles;
     std::array<HWND, kToggleCount> toggleResets;
+    std::array<HWND, kToggleCount> toggleWarnings; // a glyph before a switch when what it warns of is true, or nothing
     std::array<HWND, kGroupCount> groupLabels;
     std::array<HWND, kGroupCount> groupWarnings; // a glyph before a group's label when what it warns of is true, or nothing
     std::array<std::array<HWND, kMaxChoices>, kGroupCount> choices;

@@ -9,11 +9,17 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <variant>
 
 namespace real {
 
 constexpr NVSDK_NGX_Feature kNeuralRenderingFeature = static_cast<NVSDK_NGX_Feature>(18);
+
+// What nvngx_dlssnr.dll calls its product in its version resource. A file that is signed by NVIDIA but
+// calls itself something else may be another of NVIDIA's files under the model's name, or a later model
+// renamed; the session says so and runs with it.
+constexpr std::wstring_view kNeuralRenderingProduct = L"NVIDIA DLSSNR";
 
 struct NgxSettings
 {
