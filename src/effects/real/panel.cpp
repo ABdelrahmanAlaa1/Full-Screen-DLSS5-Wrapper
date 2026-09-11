@@ -1166,12 +1166,12 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
                             .cbClsExtra = 0,
                             .cbWndExtra = 0,
                             .hInstance = ::GetModuleHandleW(nullptr),
-                            .hIcon = nullptr,
+                            .hIcon = LargeAppIcon(),
                             .hCursor = ::LoadCursorW(nullptr, IDC_ARROW),
                             .hbrBackground = ::GetSysColorBrush(COLOR_BTNFACE),
                             .lpszMenuName = nullptr,
                             .lpszClassName = kPanelClass,
-                            .hIconSm = nullptr };
+                            .hIconSm = SmallAppIcon() };
     };
 
     // Advisory: the older common controls register their classes as they load and refuse this call, while

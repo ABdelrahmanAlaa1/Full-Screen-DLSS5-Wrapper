@@ -75,6 +75,11 @@ if(DSCREEN_ENABLE_NVOF)
   list(APPEND DSCREEN_REAL_SOURCES src/effects/real/nvof.cpp)
 endif()
 
+# The icon the shell shows for the executable and the windows carry. The resource compiler is not among
+# the project's languages, so it is asked for here, where the only target that needs it is built.
+enable_language(RC)
+list(APPEND DSCREEN_REAL_SOURCES res/app.rc)
+
 add_executable(FullScreenWrapperForDLSS5 ${DSCREEN_REAL_SOURCES})
 add_dependencies(FullScreenWrapperForDLSS5 FullScreenWrapperForDLSS5Shaders)
 target_include_directories(FullScreenWrapperForDLSS5 PRIVATE "${CMAKE_BINARY_DIR}/generated" "${NGX_INCLUDE_DIR}")

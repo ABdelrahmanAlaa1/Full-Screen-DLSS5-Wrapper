@@ -1,0 +1,5 @@
+// What the shell, the task bar and Alt+Tab show for the executable. The lowest-numbered icon in an
+// executable is the one the shell takes for the file itself, and this is the only one there is.
+#include "resource.h"
+
+IDI_APPICON ICON "Icon.ico"

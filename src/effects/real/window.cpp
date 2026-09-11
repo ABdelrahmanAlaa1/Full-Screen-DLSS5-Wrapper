@@ -1,5 +1,7 @@
 #include "effects/real/window.h"
 
+#include "res/resource.h"
+
 #include "infrastructure/fold.h"
 #include "infrastructure/text.h"
 
@@ -34,6 +36,11 @@ constexpr std::uint32_t kMaxMessagesPerPump = 64;
     case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
     default: return ::DefWindowProcW(window, message, wparam, lparam); // WAIVER(R12): window messages are an open set defined by the OS.
     }
+}
+
+[[nodiscard]] HICON IconAt(int size) noexcept
+{
+    return static_cast<HICON>(::LoadImageW(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, size, size, LR_DEFAULTCOLOR | LR_SHARED));
 }
 
 [[nodiscard]] DWORD TopmostStyle(const WindowSettings& s) noexcept
@@ -334,17 +341,20 @@ bool IsWindowShowing(interior::MonitorHandle window) noexcept
 
 Result<OutputWindow, Error> CreateOutputWindow(const interior::ScreenRect& rect, const WindowSettings& settings) noexcept
 {
+    // The window paints every pixel it owns from the swap chain, so it asks for no background brush.
     static constexpr auto ClassDescription = [] [[nodiscard]] () noexcept -> WNDCLASSEXW {
-        static constexpr auto WithClassName = [] [[nodiscard]] (WNDCLASSEXW wc) noexcept -> WNDCLASSEXW {
-            wc.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
-            wc.lpszClassName = kClassName;
-            return wc;
-        };
-        WNDCLASSEXW wc{};
-        wc.cbSize = sizeof(wc);
-        wc.lpfnWndProc = &WindowProc;
-        wc.hInstance = ::GetModuleHandleW(nullptr);
-        return WithClassName(wc);
+        return WNDCLASSEXW{ .cbSize = sizeof(WNDCLASSEXW),
+                            .style = 0,
+                            .lpfnWndProc = &WindowProc,
+                            .cbClsExtra = 0,
+                            .cbWndExtra = 0,
+                            .hInstance = ::GetModuleHandleW(nullptr),
+                            .hIcon = LargeAppIcon(),
+                            .hCursor = ::LoadCursorW(nullptr, IDC_ARROW),
+                            .hbrBackground = nullptr,
+                            .lpszMenuName = nullptr,
+                            .lpszClassName = kClassName,
+                            .hIconSm = SmallAppIcon() };
     };
 
     static constexpr auto CreateHandle = [] [[nodiscard]] (const interior::ScreenRect& rect, const WindowSettings& s) noexcept -> Result<UniqueWindow, Error> {
@@ -442,6 +452,16 @@ Status<Error> StartProcess(std::wstring_view executable, std::wstring_view argum
     };
     std::array<wchar_t, kCommandCapacity> line = CommandLineFor(executable, arguments);
     return Started(line);
+}
+
+HICON LargeAppIcon() noexcept
+{
+    return IconAt(::GetSystemMetrics(SM_CXICON));
+}
+
+HICON SmallAppIcon() noexcept
+{
+    return IconAt(::GetSystemMetrics(SM_CXSMICON));
 }
 
 Status<Error> RegisterWindowClass(const WNDCLASSEXW& description) noexcept

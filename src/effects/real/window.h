@@ -33,6 +33,12 @@ constexpr int kHotkeyQuit = 3;
 
 // Registers a window class, treating "already registered" as success. Shared with the control panel.
 [[nodiscard]] infra::Status<Error> RegisterWindowClass(const WNDCLASSEXW& description) noexcept;
+
+// The icon the executable carries, at the two sizes a window class is asked for. Shared with the resource
+// it comes from, so neither is freed; nothing at all when the executable carries none, and a class given
+// nothing shows the system's default.
+[[nodiscard]] HICON LargeAppIcon() noexcept;
+[[nodiscard]] HICON SmallAppIcon() noexcept;
 // Starts this program again with different arguments and leaves it running; used when the operator asks
 // the panel for a session the current one cannot become.
 [[nodiscard]] infra::Status<Error> StartProcess(std::wstring_view executable, std::wstring_view arguments) noexcept;
