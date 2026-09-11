@@ -92,8 +92,8 @@ std::string_view Describe(ApiCall call) noexcept
         return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
                "the loader's own account of why.";
     case ApiCall::NgxModelMissing:
-        return "DLSS 5 Neural Rendering needs NVIDIA's model file, nvngx_dlssnr.dll, and there is no such file next to FullScreenWrapperForDLSS5.exe or in the folder --ngx-path names.\n\n"
-               "The model is NVIDIA's to distribute, so it cannot be included with this program. Search the web for nvngx_dlssnr.dll and put a copy in one of those two places.";
+        return "Error nvngx_dlssnr.dll is required but was not found.\n\n"
+               "Due to copyright, I cannot bundle with this program, you need to obtain it yourself. Just search the web for nvngx_dlssnr.dll and put it next to the exe.\n\nThe app will verify the signature of the dll before using it to ensure it's correct.";
     case ApiCall::NgxDriverTooOld: return "DLSS 5 Neural Rendering is not offered by this NVIDIA driver: its NGX loader has no DLSSNR.Available";
     case ApiCall::TextureDescriptionMismatch: return "a created texture does not match its description";
     case ApiCall::PlanFrame: return "frame planning";
