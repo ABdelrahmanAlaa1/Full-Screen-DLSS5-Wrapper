@@ -48,7 +48,7 @@ struct EnvironmentSettings
 class RealEnvironment final
 {
 public:
-    RealEnvironment(Gpu gpu, const interior::SessionPlan& plan, OutputWindow window, const ControlPanel* panel, const Console& console, const EnvironmentSettings& settings,
+    RealEnvironment(HeldFiles held, Gpu gpu, const interior::SessionPlan& plan, OutputWindow window, const ControlPanel* panel, const Console& console, const EnvironmentSettings& settings,
                     const interior::Options& options, std::uint32_t finestPixels, interior::FenceValue fence, interior::Instant start) noexcept;
 
     [[nodiscard]] infra::Result<FrameStart, Error> BeginFrame(const interior::FrameState& state) noexcept;
@@ -118,6 +118,7 @@ private:
     [[nodiscard]] bool AsksForARebuild(const interior::Extent& size, interior::Instant now) const noexcept;
     void Held(const interior::Extent& size, interior::Instant now) noexcept;
 
+    HeldFiles held_; // the checked model and runtime files, open for as long as the session runs; first, so they are let go last, after the runtime that may have loaded them
     Gpu gpu_;
     interior::SessionPlan plan_;
     OutputWindow window_;
@@ -145,8 +146,8 @@ private:
     interior::Instant now_;                   // WAIVER(R2): this frame's clock reading, replaced whole per frame.
 };
 
-[[nodiscard]] infra::Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional<NgxRuntime> runtime, const interior::SessionPlan& plan, const interior::Geometry& geometry,
-                                                                      OutputWindow window, const ControlPanel* panel, const EnvironmentSettings& settings, const interior::Options& options,
-                                                                      const Console& console) noexcept;
+[[nodiscard]] infra::Result<RealEnvironment, Error> CreateEnvironment(HeldFiles held, GpuDevice device, std::optional<NgxRuntime> runtime, const interior::SessionPlan& plan,
+                                                                      const interior::Geometry& geometry, OutputWindow window, const ControlPanel* panel, const EnvironmentSettings& settings,
+                                                                      const interior::Options& options, const Console& console) noexcept;
 
 } // namespace real

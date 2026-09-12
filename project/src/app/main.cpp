@@ -137,10 +137,8 @@ struct Base
     interior::MonitorList monitors; // every monitor, not only the ones being captured, so the panel can name them
 };
 
-// Every file NVIDIA's loader may take from a folder of ours, held open once checked so the file that was
-// checked is the file that loads; the slots are the ones LoadableFilesOf lists, and these two are the
-// DLSS 5 model beside the executable, which the loader takes first, and under --ngx-path.
-using HeldFiles = std::array<std::optional<real::TrustedFile>, real::kLoadableCount>;
+// The slots of the checked files are the ones LoadableFilesOf lists; these two are the DLSS 5 model beside
+// the executable, which the loader takes first, and under --ngx-path.
 constexpr std::size_t kModelBeside = 0;
 constexpr std::size_t kModelInPath = 1;
 
@@ -164,7 +162,7 @@ struct Devices
 {
     real::GpuDevice device;
     std::optional<real::NgxRuntime> runtime;
-    HeldFiles held;
+    real::HeldFiles held; // checked and open, handed to the environment, which keeps them open for as long as it runs
 };
 
 [[nodiscard]] bool OffersSuperResolution(const Devices& d) noexcept
@@ -254,7 +252,7 @@ using Caption = real::ChoiceText;
                                           .source = b.geometry.sourceRect };
     };
     return CreatedWindow(console, b).and_then([&](real::OutputWindow window) {
-        return real::CreateEnvironment(std::move(d.device), std::move(d.runtime), plan, b.geometry, std::move(window), panel, SettingsOf(b, plan), b.options, console);
+        return real::CreateEnvironment(std::move(d.held), std::move(d.device), std::move(d.runtime), plan, b.geometry, std::move(window), panel, SettingsOf(b, plan), b.options, console);
     });
 }
 
@@ -513,10 +511,11 @@ struct Ended
             };
 
             // Every loadable file that is there, checked in turn and held in its slot, whenever NGX is started at all.
-            static constexpr auto TrustedFiles = [] [[nodiscard]] (const Console& console, const real::LoadableFiles& files, bool wanted) noexcept -> Result<HeldFiles, Error> {
+            static constexpr auto TrustedFiles = [] [[nodiscard]] (const Console& console, const real::LoadableFiles& files, bool wanted) noexcept -> Result<real::HeldFiles, Error> {
                 return std::ranges::fold_left(
-                    std::views::iota(std::size_t{ 0 }, real::kLoadableCount), Result<HeldFiles, Error>{ HeldFiles{} }, [&console, &files, wanted](Result<HeldFiles, Error> held, std::size_t i) {
-                        return std::move(held).and_then([&console, &files, wanted, i](HeldFiles slots) {
+                    std::views::iota(std::size_t{ 0 }, real::kLoadableCount), Result<real::HeldFiles, Error>{ real::HeldFiles{} },
+                    [&console, &files, wanted](Result<real::HeldFiles, Error> held, std::size_t i) {
+                        return std::move(held).and_then([&console, &files, wanted, i](real::HeldFiles slots) {
                             return TrustedModel(console, ModelToCheck(files[i], wanted), kLoadables[i].kind, kLoadables[i].name).transform([&slots, i](std::optional<real::TrustedFile> file) {
                                 slots[i] = std::move(file); // WAIVER(R2): each slot is filled once, in order, by the one file it is for.
                                 return std::move(slots);
@@ -524,7 +523,7 @@ struct Ended
                         });
                     });
             };
-            return TrustedFiles(console, real::LoadableFilesOf(settings), wantsNgx).and_then([&](HeldFiles held) {
+            return TrustedFiles(console, real::LoadableFilesOf(settings), wantsNgx).and_then([&](real::HeldFiles held) {
                 return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
                     return Devices{ std::move(device), std::move(runtime), std::move(held) };
                 });

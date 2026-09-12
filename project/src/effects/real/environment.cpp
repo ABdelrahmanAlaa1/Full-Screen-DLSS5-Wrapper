@@ -207,9 +207,9 @@ struct Prepared
 
 } // namespace
 
-RealEnvironment::RealEnvironment(Gpu gpu, const SessionPlan& plan, OutputWindow window, const ControlPanel* panel, const Console& console, const EnvironmentSettings& settings,
+RealEnvironment::RealEnvironment(HeldFiles held, Gpu gpu, const SessionPlan& plan, OutputWindow window, const ControlPanel* panel, const Console& console, const EnvironmentSettings& settings,
                                  const interior::Options& options, std::uint32_t finestPixels, interior::FenceValue fence, interior::Instant start) noexcept
-    : gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
+    : held_(std::move(held)), gpu_(std::move(gpu)), plan_(plan), window_(std::move(window)), panel_(panel), console_(console), finestPixels_(finestPixels),
       frame_{ interior::FrameNumberTag::Parse(0), *kZeroSlot, *kZeroSet, false, fence }, stats_{ start, 0, 0 }, applied_(settings), clearedDepth_(plan.depth), restartWanted_(false), resized_(false),
       pending_(plan.source), since_(start), options_(options), built_(ShapeOf(panel)), wanted_(built_), asked_(start), abandoned_(false), snapshot_(std::nullopt), recording_(std::nullopt),
       comparison_(std::nullopt), cursor_(std::nullopt), writer_(std::make_unique<PngWriter>()), now_(start)
@@ -913,7 +913,7 @@ Error RealEnvironment::FromPlanError(interior::PlanFrameError error) noexcept
     return wanted ? Present(ours) : std::span<const HWND>{};
 }
 
-Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional<NgxRuntime> runtime, const SessionPlan& plan, const interior::Geometry& geometry, OutputWindow window,
+Result<RealEnvironment, Error> CreateEnvironment(HeldFiles held, GpuDevice device, std::optional<NgxRuntime> runtime, const SessionPlan& plan, const interior::Geometry& geometry, OutputWindow window,
                                                  const ControlPanel* panel, const EnvironmentSettings& settings, const interior::Options& options, const Console& console) noexcept
 {
     static constexpr auto FromPyramid = [] [[nodiscard]] (interior::PyramidError error) noexcept -> Error { return Error{ ApiCall::PlanSession, static_cast<std::uint32_t>(error) }; };
@@ -1160,8 +1160,9 @@ Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional
         });
     };
 
-    static constexpr auto Assembled = [] [[nodiscard]] (Ready r, const SessionPlan& plan, OutputWindow window, const ControlPanel* panel, const Console& console, const EnvironmentSettings& settings,
-                                                        const interior::Options& options, const interior::LevelExtents& extents) noexcept -> Result<RealEnvironment, Error> {
+    static constexpr auto Assembled = [] [[nodiscard]] (HeldFiles held, Ready r, const SessionPlan& plan, OutputWindow window, const ControlPanel* panel, const Console& console,
+                                                        const EnvironmentSettings& settings, const interior::Options& options,
+                                                        const interior::LevelExtents& extents) noexcept -> Result<RealEnvironment, Error> {
         static constexpr auto FinestPixels = [] [[nodiscard]] (const SessionPlan& plan, const interior::LevelExtents& extents) noexcept -> Result<std::uint32_t, Error> {
             static constexpr auto FromArithmetic = [] [[nodiscard]] (infra::ArithmeticError error) noexcept -> Error {
                 return Error{ ApiCall::PlanSession, 100u + static_cast<std::uint32_t>(error) };
@@ -1170,7 +1171,8 @@ Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional
             return infra::CheckedMul(finest.width.Get(), finest.height.Get()).transform_error(FromArithmetic);
         };
         return FinestPixels(plan, extents).and_then([&](std::uint32_t finest) {
-            return Now().transform([&](interior::Instant start) { return RealEnvironment(std::move(r.gpu), plan, std::move(window), panel, console, settings, options, finest, r.fence, start); });
+            return Now().transform(
+                [&](interior::Instant start) { return RealEnvironment(std::move(held), std::move(r.gpu), plan, std::move(window), panel, console, settings, options, finest, r.fence, start); });
         });
     };
 
@@ -1190,7 +1192,7 @@ Result<RealEnvironment, Error> CreateEnvironment(GpuDevice device, std::optional
         return AssembledGpu(std::move(device), plan, geometry, window.handle.get(), settings, extents, Asked(ours, settings.asksToBeLeftOut))
             .and_then([&](Gpu gpu) { return Uncovered(gpu, settings, Present(ours)).transform([&] { return std::move(gpu); }); })
             .and_then([&](Gpu gpu) { return Started(std::move(gpu), std::move(runtime), plan); })
-            .and_then([&](Ready r) { return Assembled(std::move(r), plan, std::move(window), panel, console, settings, options, extents); });
+            .and_then([&](Ready r) { return Assembled(std::move(held), std::move(r), plan, std::move(window), panel, console, settings, options, extents); });
     });
 }
 
