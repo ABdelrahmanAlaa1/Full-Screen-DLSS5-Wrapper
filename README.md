@@ -13,16 +13,15 @@ See example screenshots below.
 </p>
 
 ## How to Download and Use
-
-1. Go to the [Releases](https://github.com/ThioJoe/DLSS5-Entire-Screen/releases) page.
-2. For the latest release, look under Assets, then download `FullScreenWrapperForDLSS5.exe`
-3. Acquire `nvngx_dlssnr.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/DLSS5-Entire-Screen#requirements) section below)
-4. Run the `exe` (no installation required).
-5. By default, it applies to the primary monitor, with more options in the View tab. You can also apply it to a specific selected window.
+1. Download the latest version of the `exe`. (Direct link [here](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/releases/latest/download/FullScreenWrapperForDLSS5.exe))
+    - Or find it under the latest [Release](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/releases) under "Assets"
+2. Acquire `nvngx_dlssnr.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#requirements) section below)
+3. Run the `exe` (no installation required).
+4. By default, it applies to the primary monitor, with more options in the View tab. You can also apply it to a specific selected window.
 
 ## Key Features:
 - It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
-- Does NOT inject itself into or modify any other applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/DLSS5-Entire-Screen#how-it-works) explanation below)
+- Does NOT inject itself into or modify any other applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#how-it-works) explanation below)
   - Therefore it should present no more false-positive anti-cheat risk than ordinary screen-capture software.
 - Full control over internal model inputs. Including uncapped values for structure and tone.
 - Ability to selectively apply it to a specific window.
@@ -64,12 +63,11 @@ See example screenshots below.
 
 # Requirements
 
-- You need Nvidia drivers `616.64` or newer.
+- You need a 50-Series Nvidia GPU and Nvidia drivers `616.64` or newer
 - You must acquire `nvngx_dlssnr.dll` yourself and put it next to the app `exe`.
   - Just Google it, you can find people who have uploaded it like on reddit.
   - For copyright reasons I will not host or link to it from here.
   - Note: The app will verify the dll's signature to ensure it's the right file either way.
-- Tested on a 50 series GPU. Not sure if it works on other generations.
 
 ### Optional:
 - `nvngx_dlss.dll` - Enables use of super resolution options. Also put that next to the `exe`.
@@ -86,4 +84,4 @@ On a simple level, it:
     - This window is "click through", so it is effectively invisible to the cursor. This means you can click, hover, and interact with everything beneath just as you normally would.
     - If you have it set to affect only a specific window, it only covers that window. If set to apply to the whole screen, the window covers the entire screen. 
 
-For a much more detailed and technical explanation, see the [Advanced Readme](https://github.com/ThioJoe/DLSS5-Entire-Screen/blob/main/Readme_Advanced.md) file  (`Readme_Advanced.md`).
+For a much more detailed and technical explanation, see the [Advanced Readme](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/blob/main/Readme_Advanced.md) file  (`Readme_Advanced.md`).
