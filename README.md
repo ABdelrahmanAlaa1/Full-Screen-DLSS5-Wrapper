@@ -11,7 +11,7 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 
 # App Screenshot
 <p align="center">
-<img width="750" src="https://github.com/user-attachments/assets/0db29600-2e94-4714-9c36-5dbe2a446619" />
+<img width="750" alt="Full-Screen Wrapper for DLSS5 — Main app screenshot" src="https://github.com/user-attachments/assets/e0d18450-cc59-4382-9990-d79043a2ed48" />
 </p>
 
 ## How to Download and Use
@@ -22,12 +22,22 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 4. By default, it applies to the primary monitor, with more options in the View tab. You can also apply it to a specific selected window.
 
 ## Key Features:
-- It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
-    - It's also signed with a trusted certificate.
-- Does NOT inject itself into or modify any other applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#how-it-works) explanation below)
-  - Therefore it should present no more false-positive anti-cheat risk than ordinary screen-capture software or graphics-enhancement overlay software.
+
 - Full control over internal model inputs. Including uncapped values for structure and tone.
 - Ability to selectively apply it to a specific window.
+- Built in screenshot and recording feature.
+  - Simultaneously capture both the original image/video and its processed output as separate files.
+  - The video files are perfectly synchronized frame-by-frame for easy comparison.
+
+## Why This Over Similar Tools?
+- It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
+    - It's also signed with a trusted certificate.
+- Theoretically anti-cheat false-positive safe
+  - Does NOT inject itself into or modify any other applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#how-it-works) explanation below)
+  - Therefore it _should_ present no more false-positive anti-cheat risk than ordinary screen-capture software or graphics-enhancement overlay software.
+  - Verifies any DLLs are the originals signed by Nvidia and unmodified before loading.
+  - It's code signed, so any anti-cheat providers could see you are running the unmodified version of the tool, which verifiably only loads official unmodified Nvidia binaries.
+  - That being said, some anti-cheats may block overlays in general and might kick you at worst. So still best to not use it in competitive games to be safe.
 
 # Example Screenshots
 
@@ -43,22 +53,22 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 
 <h3 align="center">Original Screenshot:</h3>
 <p align="center">
-<img width="2551" height="1587" alt="Oblivion Original" src="https://github.com/user-attachments/assets/c75de803-3a08-4025-9d76-cfcaa7922996" />
+<img width="1000" alt="Oblivion Original" src="https://github.com/user-attachments/assets/c75de803-3a08-4025-9d76-cfcaa7922996" />
 </p>
 
 <h3 align="center">Standard Tone and Structure Settings:</h3>
 <p align="center">
-<img width="2552" height="1589" alt="Oblivion Standard" src="https://github.com/user-attachments/assets/8af48486-0b97-4d8a-a5f7-8b2b930f9006" />
+<img width="1000" alt="Oblivion Standard" src="https://github.com/user-attachments/assets/8af48486-0b97-4d8a-a5f7-8b2b930f9006" />
 </p>
 
-<h3 align="center">3X Multiplier:</h3>
+<h3 align="center">Standard + 3X Multiplier:</h3>
 <p align="center">
-<img width="2555" height="1589" alt="Oblivion 3x Standard" src="https://github.com/user-attachments/assets/7f6b574f-2143-4d25-bc00-032c2d24f38a" />
+<img width="1000" alt="Oblivion 3x Standard" src="https://github.com/user-attachments/assets/7f6b574f-2143-4d25-bc00-032c2d24f38a" />
 </p>
 
-<h3 align="center">20X Multiplier:</h3>
+<h3 align="center">Standard + 20X Multiplier:</h3>
 <p align="center">
-<img width="2554" height="1585" alt="Oblivion 20x" src="https://github.com/user-attachments/assets/9f2422c9-cc0c-4bff-81cc-02a0c210882b" />
+<img width="1000" alt="Oblivion 20x" src="https://github.com/user-attachments/assets/9f2422c9-cc0c-4bff-81cc-02a0c210882b" />
 </p>
 
 ------
@@ -88,3 +98,28 @@ On a simple level, it:
     - If you have it set to affect only a specific window, it only covers that window. If set to apply to the whole screen, the window covers the entire screen. 
 
 For a much more detailed and technical explanation, see the [Advanced Readme](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/blob/main/Readme_Advanced.md) file  (`Readme_Advanced.md`).
+
+# Optional: Launching via Commandline
+- The tool can be launched by simply double clicking the `exe` to launch the GUI, or via the command line.
+- If you launch the app from command line, it will output debug info there. There are also file logging options as CLI arguments.
+- Use the `--help` argument to see all command line options (mostly the same options as in the GUI)
+
+-----
+
+# Screenshots of Other App Tabs
+
+<h3 align="center">Capture Tab</h3>
+<p align="center">
+    <img width="605" alt="Full-Screen Wrapper for DLSS5 Capture Tab" src="https://github.com/user-attachments/assets/be3883b2-7cbb-41e0-96f0-473f2fb08671" />
+</p>
+
+<h3 align="center">Advanced Tab</h3>
+<p align="center">
+    <img width="605" alt="Full-Screen Wrapper for DLSS5 Advanced Tab" src="https://github.com/user-attachments/assets/996b1d71-3ebe-4356-996a-71decbb5bc82" />
+</p>
+
+<h3 align="center">View Tab</h3>
+<p align="center">
+    <img width="605" alt="Full-Screen Wrapper for DLSS5 View Tab" src="https://github.com/user-attachments/assets/cfdf76c1-8a81-4d3b-ad6b-360324cec3b4" />
+</p>
+
