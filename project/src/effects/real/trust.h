@@ -19,9 +19,10 @@ struct TrustedFile
 // Which of NVIDIA's files is being checked, which is what a refusal names.
 enum class ModelKind : std::uint8_t { NeuralRendering, SuperResolution };
 
-// Verifies the Authenticode signature and that the certificate names NVIDIA, and fails without both; only
-// then is the product name read, which is for the caller to judge. Revocation is not chased, which would
-// mean a network call on a path that has to work offline.
+// Verifies every Authenticode signature the file carries, the first and each one after it, and fails
+// unless each is trusted and one of their signers names NVIDIA; only then is the product name read, which
+// is for the caller to judge. Revocation is not chased, which would mean a network call on a path that has
+// to work offline.
 [[nodiscard]] infra::Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind kind) noexcept;
 
 } // namespace real

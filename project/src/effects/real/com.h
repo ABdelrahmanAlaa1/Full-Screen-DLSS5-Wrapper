@@ -174,6 +174,10 @@ using ErrorText = infra::BoundedString<char, 400>;
     return {};
 }
 
+// The code a refused signature carries when the file has more signatures than are checked, in place of
+// the verdict WinVerifyTrust gives, which is never this value.
+constexpr std::uint32_t kSignaturesUnchecked = 0xFFFFFFFFu;
+
 [[nodiscard]] inline Error LastError(ApiCall call) noexcept
 {
     return Error{ call, static_cast<std::uint32_t>(::GetLastError()) };

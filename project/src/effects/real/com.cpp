@@ -87,10 +87,10 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::WindowNotFound: return "no visible window has --window in its title";
     case ApiCall::OpenModelFile: return "opening nvngx_dlssnr.dll to check its signature";
     case ApiCall::ModelNotSigned: return "ERROR: nvngx_dlssnr.dll has no signature Windows trusts. It is not the correct file.";
-    case ApiCall::ModelNotFromNvidia: return "ERROR: nvngx_dlssnr.dll is signed, but not by NVIDIA. It is not the correct file.";
+    case ApiCall::ModelNotFromNvidia: return "ERROR: nvngx_dlssnr.dll is signed, but none of its signers is NVIDIA. It is not the correct file.";
     case ApiCall::OpenUpscalerFile: return "opening nvngx_dlss.dll to check its signature";
     case ApiCall::UpscalerNotSigned: return "ERROR: nvngx_dlss.dll has no signature Windows trusts. It is not the correct file.";
-    case ApiCall::UpscalerNotFromNvidia: return "ERROR: nvngx_dlss.dll is signed, but not by NVIDIA. It is not the correct file.";
+    case ApiCall::UpscalerNotFromNvidia: return "ERROR: nvngx_dlss.dll is signed, but none of its signers is NVIDIA. It is not the correct file.";
     case ApiCall::NgxNeuralRenderingUnavailable:
         return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
                "the loader's own account of why.";
@@ -162,8 +162,11 @@ ErrorText Describe(const Error& error) noexcept
                                                      InstalledText(installed).Get());
     };
     // A refused signature carries WinVerifyTrust's verdict as its code, which says whether there was a
-    // signature at all, one that no longer matches the file, or one Windows does not trust.
+    // signature at all, one that no longer matches the file, or one Windows does not trust; or the one code
+    // that is no verdict, for a file with more signatures than are checked.
     static constexpr auto SignatureText = [] [[nodiscard]] (std::string_view file, std::uint32_t verdict) noexcept -> ErrorText {
+        if (verdict == kSignaturesUnchecked)
+            return infra::Formatted<ErrorText::Capacity>("ERROR: {} carries more signatures than this program checks, so they cannot all be trusted. It is not the correct file.", file);
         if (verdict == static_cast<std::uint32_t>(TRUST_E_NOSIGNATURE))
             return infra::Formatted<ErrorText::Capacity>("ERROR: {} is not signed. It is not the correct file.", file);
         if (verdict == static_cast<std::uint32_t>(TRUST_E_BAD_DIGEST))
