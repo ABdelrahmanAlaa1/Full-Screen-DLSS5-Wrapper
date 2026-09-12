@@ -36,18 +36,17 @@ struct NgxSettings
 // Where nvngx_dlssnr.dll sits among the folders the loader searches (the executable folder, then
 // --ngx-path), or nothing. The loader builds feature 18 from that file; the driver does not install it.
 [[nodiscard]] std::optional<interior::DirectoryPath> NeuralRenderingModelLocation(const NgxSettings& settings) noexcept;
-// The file the loader will build feature 18 from, when there is one to be found.
-[[nodiscard]] std::optional<interior::FilePath> NeuralRenderingModelFile(const NgxSettings& settings) noexcept;
-// The file the loader will build feature 1 from, when one sits in a folder of ours. Nothing there does not
-// mean super resolution is unavailable: the driver carries a copy of its own, which the driver store keeps.
-[[nodiscard]] std::optional<interior::FilePath> SuperResolutionModelFile(const NgxSettings& settings) noexcept;
 
-// The NGX runtime under either of its names, _nvngx.dll then nvngx.dll, when a copy sits in the folder the
-// executable sits in: NVIDIA's loader takes one from there before the driver's own, and the folder is one
-// anyone may write to, so one found there is checked before the loader is let at it. Nothing for a name
-// with no file under it.
-using RuntimeFiles = std::array<std::optional<interior::FilePath>, 2>;
-[[nodiscard]] RuntimeFiles NgxRuntimeFilesBeside(const NgxSettings& settings) noexcept;
+// Every file NVIDIA's loader may take from a folder of ours: each model, and the runtime under either of
+// its names, in the folder the executable sits in and under --ngx-path, each where it is there. Both are
+// folders anyone may write to, so whatever is found is checked before the loader is let at it, and a copy
+// in each folder is checked, since which of them the loader takes first is its own affair. Nothing where
+// there is no file, and no super resolution model of ours does not mean super resolution is unavailable:
+// the driver carries a copy of its own, which the driver store keeps. The order is the DLSS 5 model, the
+// super resolution model, _nvngx.dll and nvngx.dll, each beside the executable and then under --ngx-path.
+constexpr std::size_t kLoadableCount = 8;
+using LoadableFiles = std::array<std::optional<interior::FilePath>, kLoadableCount>;
+[[nodiscard]] LoadableFiles LoadableFilesOf(const NgxSettings& settings) noexcept;
 
 // The driver keeps the path pointers, so an NgxPaths lives on the heap and never moves.
 class NgxPaths final

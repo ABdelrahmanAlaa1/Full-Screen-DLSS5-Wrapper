@@ -137,16 +137,34 @@ struct Base
     interior::MonitorList monitors; // every monitor, not only the ones being captured, so the panel can name them
 };
 
-// The NGX runtime under either of its names when a copy sits beside the program, held for the same reason.
-using HeldRuntimes = std::array<std::optional<real::TrustedFile>, 2>;
+// Every file NVIDIA's loader may take from a folder of ours, held open once checked so the file that was
+// checked is the file that loads; the slots are the ones LoadableFilesOf lists, and these two are the
+// DLSS 5 model beside the executable, which the loader takes first, and under --ngx-path.
+using HeldFiles = std::array<std::optional<real::TrustedFile>, real::kLoadableCount>;
+constexpr std::size_t kModelBeside = 0;
+constexpr std::size_t kModelInPath = 1;
+
+// What each slot holds: the kind a refusal is named under, and the name the log says.
+struct Loadable
+{
+    real::ModelKind kind;
+    std::string_view name;
+};
+
+constexpr std::array<Loadable, real::kLoadableCount> kLoadables{ { { real::ModelKind::NeuralRendering, "nvngx_dlssnr.dll" },
+                                                                   { real::ModelKind::NeuralRendering, "nvngx_dlssnr.dll" },
+                                                                   { real::ModelKind::SuperResolution, "nvngx_dlss.dll" },
+                                                                   { real::ModelKind::SuperResolution, "nvngx_dlss.dll" },
+                                                                   { real::ModelKind::Runtime, "_nvngx.dll" },
+                                                                   { real::ModelKind::Runtime, "_nvngx.dll" },
+                                                                   { real::ModelKind::Runtime, "nvngx.dll" },
+                                                                   { real::ModelKind::Runtime, "nvngx.dll" } } };
 
 struct Devices
 {
     real::GpuDevice device;
     std::optional<real::NgxRuntime> runtime;
-    std::optional<real::TrustedFile> model;    // held open so the file that was checked is the file that loads
-    std::optional<real::TrustedFile> upscaler; // the same, for the super resolution model when one sits in a folder of ours
-    HeldRuntimes runtimes;
+    HeldFiles held;
 };
 
 [[nodiscard]] bool OffersSuperResolution(const Devices& d) noexcept
@@ -154,10 +172,12 @@ struct Devices
     return d.runtime.has_value() && real::OffersSuperResolution(*d.runtime);
 }
 
-// Whether the model file calls itself what the model is called. With no file of ours in play there is nothing to doubt.
+// Whether the model file calls itself what the model is called: the copy beside the executable, which the
+// loader takes first, or else the one under --ngx-path. With no file of ours in play there is nothing to doubt.
 [[nodiscard]] bool ModelAsNamed(const Devices& d) noexcept
 {
-    return !d.model.has_value() || d.model->product.Get() == real::kNeuralRenderingProduct;
+    const std::optional<real::TrustedFile>& model = d.held[kModelBeside].has_value() ? d.held[kModelBeside] : d.held[kModelInPath];
+    return !model.has_value() || model->product.Get() == real::kNeuralRenderingProduct;
 }
 
 [[nodiscard]] bool OverlapsSource(const Options& o, const Geometry& g) noexcept
@@ -448,8 +468,9 @@ struct Ended
             };
 
             // A model is a DLL the loader picks up by name from a folder anyone may write to, so what is found there
-            // is checked and then held open for the life of the session. A missing file is left to the loader, which
-            // says so better: neural rendering stops without one, and super resolution has the driver's own copy.
+            // is checked and then held open for the life of the session, whether or not the session will use it: the
+            // loader may open it all the same. A missing file is left to the loader, which says so better: neural
+            // rendering stops without one, and super resolution has the driver's own copy.
             static constexpr auto TrustedModel = [] [[nodiscard]] (const Console& console, const std::optional<interior::FilePath>& file, real::ModelKind kind,
                                                                    std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
                 // Only the DLSS 5 model's product name is judged; the super resolution file's is only said.
@@ -491,26 +512,23 @@ struct Ended
                 return wanted ? found : std::nullopt;
             };
 
-            // The runtime under either of its names, each checked the way a model is, when NGX is wanted at all.
-            static constexpr auto TrustedRuntimes = [] [[nodiscard]] (const Console& console, const real::RuntimeFiles& files, bool wanted) noexcept -> Result<HeldRuntimes, Error> {
-                return TrustedModel(console, ModelToCheck(files[0], wanted), real::ModelKind::Runtime, "_nvngx.dll").and_then([&](std::optional<real::TrustedFile> core) {
-                    return TrustedModel(console, ModelToCheck(files[1], wanted), real::ModelKind::Runtime, "nvngx.dll").transform([&core](std::optional<real::TrustedFile> loader) {
-                        return HeldRuntimes{ std::move(core), std::move(loader) };
-                    });
-                });
-            };
-            const bool wantsSr = interior::WantsSuperResolution(b.options, b.geometry.sourceExtent, b.geometry.targetExtent);
-            return TrustedModel(console, ModelToCheck(real::NeuralRenderingModelFile(settings), wantsNgx && b.options.neuralRendering), real::ModelKind::NeuralRendering, "nvngx_dlssnr.dll")
-                .and_then([&](std::optional<real::TrustedFile> model) {
-                    return TrustedModel(console, ModelToCheck(real::SuperResolutionModelFile(settings), wantsSr), real::ModelKind::SuperResolution, "nvngx_dlss.dll")
-                        .and_then([&](std::optional<real::TrustedFile> upscaler) {
-                            return TrustedRuntimes(console, real::NgxRuntimeFilesBeside(settings), wantsNgx).and_then([&](HeldRuntimes held) {
-                                return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
-                                    return Devices{ std::move(device), std::move(runtime), std::move(model), std::move(upscaler), std::move(held) };
-                                });
+            // Every loadable file that is there, checked in turn and held in its slot, whenever NGX is started at all.
+            static constexpr auto TrustedFiles = [] [[nodiscard]] (const Console& console, const real::LoadableFiles& files, bool wanted) noexcept -> Result<HeldFiles, Error> {
+                return std::ranges::fold_left(
+                    std::views::iota(std::size_t{ 0 }, real::kLoadableCount), Result<HeldFiles, Error>{ HeldFiles{} }, [&console, &files, wanted](Result<HeldFiles, Error> held, std::size_t i) {
+                        return std::move(held).and_then([&console, &files, wanted, i](HeldFiles slots) {
+                            return TrustedModel(console, ModelToCheck(files[i], wanted), kLoadables[i].kind, kLoadables[i].name).transform([&slots, i](std::optional<real::TrustedFile> file) {
+                                slots[i] = std::move(file); // WAIVER(R2): each slot is filled once, in order, by the one file it is for.
+                                return std::move(slots);
                             });
                         });
+                    });
+            };
+            return TrustedFiles(console, real::LoadableFilesOf(settings), wantsNgx).and_then([&](HeldFiles held) {
+                return OptionalRuntime(console, device, b.options, settings, wantsNgx).transform([&](std::optional<real::NgxRuntime> runtime) {
+                    return Devices{ std::move(device), std::move(runtime), std::move(held) };
                 });
+            });
         };
         const bool wantsNgx = WantsNgx(b.options, b.geometry);
         return real::CreateGpuDevice(real::DeviceSettings{ b.options.debugLayer, b.options.adapter }).and_then([&](real::GpuDevice device) {

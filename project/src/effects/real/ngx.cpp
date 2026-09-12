@@ -53,15 +53,6 @@ constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + s
     return ModelIn(settings.executableDirectory, model).or_else([&settings, model] { return ModelIn(settings.featurePath, model); });
 }
 
-[[nodiscard]] std::optional<interior::FilePath> ModelFile(const NgxSettings& settings, std::wstring_view model) noexcept
-{
-    return ModelLocation(settings, model).and_then([model](const interior::DirectoryPath& directory) {
-        return interior::FilePath::Parse(ModelPathIn(directory.Get(), model).data())
-            .transform([](const interior::FilePath& path) { return std::optional<interior::FilePath>{ path }; })
-            .value_or(std::nullopt);
-    });
-}
-
 [[nodiscard]] Status<Error> CheckNgx(NVSDK_NGX_Result result, ApiCall call) noexcept
 {
     if (NVSDK_NGX_FAILED(result))
@@ -259,17 +250,7 @@ std::optional<interior::DirectoryPath> NeuralRenderingModelLocation(const NgxSet
     return ModelLocation(settings, kNeuralRenderingModel);
 }
 
-std::optional<interior::FilePath> NeuralRenderingModelFile(const NgxSettings& settings) noexcept
-{
-    return ModelFile(settings, kNeuralRenderingModel);
-}
-
-std::optional<interior::FilePath> SuperResolutionModelFile(const NgxSettings& settings) noexcept
-{
-    return ModelFile(settings, kSuperResolutionModel);
-}
-
-RuntimeFiles NgxRuntimeFilesBeside(const NgxSettings& settings) noexcept
+LoadableFiles LoadableFilesOf(const NgxSettings& settings) noexcept
 {
     static constexpr auto FileIn = [] [[nodiscard]] (const interior::DirectoryPath& directory, std::wstring_view name) noexcept -> std::optional<interior::FilePath> {
         if (directory.IsEmpty() || ::GetFileAttributesW(ModelPathIn(directory.Get(), name).data()) == INVALID_FILE_ATTRIBUTES)
@@ -278,7 +259,10 @@ RuntimeFiles NgxRuntimeFilesBeside(const NgxSettings& settings) noexcept
             .transform([](const interior::FilePath& path) { return std::optional<interior::FilePath>{ path }; })
             .value_or(std::nullopt);
     };
-    return RuntimeFiles{ FileIn(settings.executableDirectory, kRuntimeNames[0]), FileIn(settings.executableDirectory, kRuntimeNames[1]) };
+    return LoadableFiles{ FileIn(settings.executableDirectory, kNeuralRenderingModel), FileIn(settings.featurePath, kNeuralRenderingModel),
+                          FileIn(settings.executableDirectory, kSuperResolutionModel), FileIn(settings.featurePath, kSuperResolutionModel),
+                          FileIn(settings.executableDirectory, kRuntimeNames[0]),      FileIn(settings.featurePath, kRuntimeNames[0]),
+                          FileIn(settings.executableDirectory, kRuntimeNames[1]),      FileIn(settings.featurePath, kRuntimeNames[1]) };
 }
 
 Requirement RequirementOf(const GpuDevice& gpu, const NgxSettings& settings, NVSDK_NGX_Feature feature) noexcept
