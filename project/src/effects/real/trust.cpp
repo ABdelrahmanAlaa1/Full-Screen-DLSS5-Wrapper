@@ -36,6 +36,8 @@ constexpr std::size_t kKeyCapacity = 64;
 constexpr DWORD kMaxSecondarySignatures = 15;
 // The certificates a signer's chain is copied from, at most: a chain longer than this is not one NVIDIA signs with.
 constexpr DWORD kMaxChainCertificates = 16;
+// How long the chain build may spend on each thing it fetches, a root Microsoft lists that the machine does not hold yet above all.
+constexpr DWORD kFetchMilliseconds = 15000;
 
 // The calls a check on one of the files fails with, so a refusal names the file it is about.
 struct Refusals
@@ -217,9 +219,10 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
 
                 // The signer's chain built again from two sources only, Microsoft's own root list and the
                 // certificates the signature brought with it, at the moment the signature was verified for,
-                // asked for code signing and answered from the cache: a root anyone put into the ordinary
-                // stores does not count. Zero when the chain is clean and the base policy accepts it;
-                // otherwise the chain's trust status, the policy's error or the call's.
+                // and asked for code signing: a root anyone put into the ordinary stores does not count, and a
+                // root on Microsoft's list that the machine does not hold yet is fetched, with a bound on the
+                // wait. Zero when the chain is clean and the base policy accepts it; otherwise the chain's
+                // trust status, the policy's error or the call's.
                 static constexpr auto RootTrouble = [] [[nodiscard]] (const CRYPT_PROVIDER_SGNR* signer, const CERT_CONTEXT* certificate) noexcept -> DWORD {
                     // The signer's own chain less any self-signed certificate, in a store of this call's own.
                     // A root in it would not be trusted for being there; none is put there to begin with.
@@ -243,7 +246,7 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
                                                      CERT_USAGE_MATCH{ .dwType = USAGE_MATCH_TYPE_AND, .Usage = CERT_ENHKEY_USAGE{ .cUsageIdentifier = 1, .rgpszUsageIdentifier = usages.data() } },
                                                  .RequestedIssuancePolicy =
                                                      CERT_USAGE_MATCH{ .dwType = USAGE_MATCH_TYPE_AND, .Usage = CERT_ENHKEY_USAGE{ .cUsageIdentifier = 0, .rgpszUsageIdentifier = nullptr } },
-                                                 .dwUrlRetrievalTimeout = 0,
+                                                 .dwUrlRetrievalTimeout = kFetchMilliseconds,
                                                  .fCheckRevocationFreshnessTime = FALSE,
                                                  .dwRevocationFreshnessTime = 0,
                                                  .pftCacheResync = nullptr,
@@ -251,8 +254,7 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
                                                  .dwStrongSignFlags = 0 };
                         FILETIME asOf = signer->sftVerifyAsOf;
                         const CERT_CHAIN_CONTEXT* chain = nullptr; // WAIVER(R2): the answer of one call, read once after it.
-                        if (::CertGetCertificateChain(HCCE_LOCAL_MACHINE, certificate, &asOf, carried, &request, CERT_CHAIN_ONLY_ADDITIONAL_AND_AUTH_ROOT | CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL,
-                                                      nullptr, &chain) == FALSE)
+                        if (::CertGetCertificateChain(HCCE_LOCAL_MACHINE, certificate, &asOf, carried, &request, CERT_CHAIN_ONLY_ADDITIONAL_AND_AUTH_ROOT, nullptr, &chain) == FALSE)
                         {
                             const DWORD error = ::GetLastError();
                             return Fail(error == 0 ? static_cast<DWORD>(TRUST_E_SYSTEM_ERROR) : error);

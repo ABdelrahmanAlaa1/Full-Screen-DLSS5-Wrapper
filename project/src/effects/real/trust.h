@@ -25,7 +25,8 @@ enum class ModelKind : std::uint8_t { NeuralRendering, SuperResolution, OpticalF
 // again from Microsoft's own trusted root list and the certificates the signature carries, is clean: a root
 // anyone put into the ordinary Windows stores does not count. Only then is the product name read, which is
 // for the caller to judge. Revocation is not chased, which would mean a network call on a path that has to
-// work offline, and neither is a root fetched: Microsoft's copy has to be on the machine already.
+// work offline; a root on Microsoft's list that the machine does not hold yet is fetched for that chain,
+// which is the one call over the network this check can make, and it is bounded.
 [[nodiscard]] infra::Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind kind) noexcept;
 
 // Asks Windows, for every library the process loads by name from here on, its own and those loaded inside
