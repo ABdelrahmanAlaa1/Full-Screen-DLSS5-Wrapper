@@ -2,12 +2,14 @@
 
 ### A demo app that applies DLSS5 to the entire screen (even the desktop) with full model controls.
 
-See example screenshots below.
+Just a single `exe` (signed with a trusted certificate) written in C++ with zero third-party dependencies.
+
+<br>
 
 > [!NOTE]
-> This is an UNOFFICIAL project, not associated with Nvidia.
+> This is an UNOFFICIAL project, not ssociated with Nvidia.
 
-## App Screenshot
+# App Screenshot
 <p align="center">
 <img width="750" src="https://github.com/user-attachments/assets/0db29600-2e94-4714-9c36-5dbe2a446619" />
 </p>
@@ -27,7 +29,7 @@ See example screenshots below.
 - Full control over internal model inputs. Including uncapped values for structure and tone.
 - Ability to selectively apply it to a specific window.
 
-## Examples
+# Example Screenshots
 
 > [!IMPORTANT]
 > The output of this app will look different than if used with a natively supported DLSS5 game.
