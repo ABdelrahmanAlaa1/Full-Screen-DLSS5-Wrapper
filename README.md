@@ -21,8 +21,9 @@ See example screenshots below.
 
 ## Key Features:
 - It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
+    - It's also signed with a trusted certificate.
 - Does NOT inject itself into or modify any other applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#how-it-works) explanation below)
-  - Therefore it should present no more false-positive anti-cheat risk than ordinary screen-capture software.
+  - Therefore it should present no more false-positive anti-cheat risk than ordinary screen-capture software or graphics-enhancement overlay software.
 - Full control over internal model inputs. Including uncapped values for structure and tone.
 - Ability to selectively apply it to a specific window.
 
