@@ -7,7 +7,7 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 <br>
 
 > [!NOTE]
-> This is an UNOFFICIAL project, not ssociated with Nvidia.
+> This is an UNOFFICIAL project, not associated with Nvidia.
 
 # App Screenshot
 <p align="center">
