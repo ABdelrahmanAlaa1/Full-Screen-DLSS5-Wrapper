@@ -148,6 +148,12 @@ The portable core, simulator, tests and gate tools also build on Linux with GCC 
 cmake -S . -B build-linux -G Ninja && cmake --build build-linux && ctest --test-dir build-linux
 ```
 
+The version number, the program's name, the copyright and the repository address are written once, in
+`src/global_common.h`. The About page, the window titles, the usage text, the NGX project identity, the
+version record in `res/app.rc` (what the file's Properties window lists on its Details page) and the CMake
+project version all read them from there, so a release is numbered by changing the three numbers at the
+top of that file.
+
 ## Run
 
 Double-clicking the executable opens the control panel and the overlay, with no console window. Every

@@ -80,8 +80,9 @@ if(DSCREEN_ENABLE_NVOF)
   list(APPEND DSCREEN_REAL_SOURCES src/effects/real/nvof.cpp)
 endif()
 
-# The icon the shell shows for the executable and the windows carry. The resource compiler is not among
-# the project's languages, so it is asked for here, where the only target that needs it is built.
+# The icon the shell shows for the executable and the windows carry, and the version record the file's
+# Properties window lists. The resource compiler is not among the project's languages, so it is asked for
+# here, where the only target that needs it is built.
 enable_language(RC)
 list(APPEND DSCREEN_REAL_SOURCES res/app.rc)
 
