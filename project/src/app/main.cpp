@@ -911,6 +911,10 @@ constexpr std::string_view kWindowGoneText = "The window could not be captured, 
 
 int main()
 {
+    // Before anything that could load a library: from here on a name found in the system folder is taken from there.
+    const infra::Status<real::Error> loading = real::PreferSystemLibraries();
+    if (!loading.has_value())
+        return ReportEarly(loading.error());
     const infra::Result<Arguments, real::Error> arguments = ReadArguments();
     if (!arguments.has_value())
         return ReportEarly(arguments.error());

@@ -97,6 +97,7 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::OpenRuntimeFile: return "opening the NGX runtime beside the program to check its signature";
     case ApiCall::RuntimeNotSigned: return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) has no signature Windows trusts. It is not the correct file.";
     case ApiCall::RuntimeNotFromNvidia: return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) is signed, but none of its signers is NVIDIA. It is not the correct file.";
+    case ApiCall::ImageLoadPolicy: return "asking Windows to take a library from its own folder before the program's";
     case ApiCall::NgxNeuralRenderingUnavailable:
         return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
                "the loader's own account of why.";

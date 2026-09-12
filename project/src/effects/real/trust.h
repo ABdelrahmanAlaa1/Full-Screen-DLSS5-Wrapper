@@ -26,4 +26,10 @@ enum class ModelKind : std::uint8_t { NeuralRendering, SuperResolution, OpticalF
 // to work offline.
 [[nodiscard]] infra::Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind kind) noexcept;
 
+// Asks Windows, for every library the process loads by name from here on, its own and those loaded inside
+// the libraries it uses, to take the one in the system folder whenever one of that name is there, so a
+// file put beside the program cannot stand in for it. The executable's own imports are resolved before
+// main runs; the linker's dependent load flag confines those to the system folder.
+[[nodiscard]] infra::Status<Error> PreferSystemLibraries() noexcept;
+
 } // namespace real

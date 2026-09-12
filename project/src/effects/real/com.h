@@ -107,6 +107,7 @@ enum class ApiCall : std::uint8_t {
     OpenRuntimeFile, // and on the NGX runtime, _nvngx.dll or nvngx.dll, when a copy sits beside the program
     RuntimeNotSigned,
     RuntimeNotFromNvidia,
+    ImageLoadPolicy,
     TextureDescriptionMismatch,
     PlanFrame,
     LoadOpticalFlow,

@@ -106,13 +106,31 @@ holds it. `nvngx_dlss.dll` (super resolution, feature 1) is NVIDIA's too, and is
 session runs without super resolution, and the panel says so beside a warning glyph.
 
 Because the NGX loader picks these files up by name from a folder anyone can write to, this tool checks
-whichever of them it finds in one of those folders before the loader gets there: Windows must accept its Authenticode signature, and the signing certificate's
-name must begin with NVIDIA. A file that fails either stops the session before NGX is so much as initialised. One that passes is then asked what its version resource calls its product:
+whichever of them it finds in one of those folders before the loader gets there: Windows must accept every Authenticode signature the file carries (a driver file often carries NVIDIA's and Microsoft's), and one of the signers'
+names must begin with NVIDIA. A file that fails either stops the session before NGX is so much as initialised. One that passes is then asked what its version resource calls its product:
 `nvngx_dlssnr.dll` is expected to say `NVIDIA DLSSNR`, and one that says something else is used anyway, under a warning in the log and a glyph beside the model's switch on the panel, since it may be some other file of NVIDIA's under the model's name, or a later model. Each is then held open, shared for reading only,
 for as long as the session runs, so it cannot be written to, deleted or renamed afterwards — the file that
 was checked is the file that loads. A model that is not in one of those folders is not checked: super
 resolution may still run from the driver's own copy, which lives where Windows, not this tool, guards it. This does not defend against a machine that was already compromised
 before the check, and it says nothing about a model loaded from anywhere else.
+
+## What else the program loads
+
+Every other library the program takes in is pinned to where it belongs, so a file put beside the executable
+cannot stand in for one:
+
+- The libraries the executable is linked against are resolved by Windows from the system folder only (the
+  linker's dependent load flag), and every library loaded by name after that, by the program or inside the
+  libraries it uses, is taken from the system folder whenever one of that name is there (the process asks
+  for that image load policy before it does anything else).
+- `nvofapi64.dll`, the driver's optical flow library, is opened by its full path in the system folder,
+  checked for its signatures the way the models are, held open, and only then loaded, with its own imports
+  confined to the system folder.
+- NVIDIA's NGX loader looks for its runtime, `_nvngx.dll` or `nvngx.dll`, beside the executable before it
+  takes the driver's own copy. One found there is checked and held the way the models are before the
+  loader runs.
+- The one Windows library the program loads by name, `ext-ms-win-windowing-external-l1-1-0.dll`, is asked
+  for from the system folder only.
 
 ## Requirements
 

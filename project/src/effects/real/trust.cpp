@@ -234,4 +234,16 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
     });
 }
 
+Status<Error> PreferSystemLibraries() noexcept
+{
+    // The record is a union over a bitfield, so its flags are zeroed as one word, which decides every bit
+    // (remote images and low-label images allowed, and their audit bits off), and then the one wanted set.
+    PROCESS_MITIGATION_IMAGE_LOAD_POLICY policy{}; // WAIVER(R2): a record filled once, before it is handed over.
+    policy.Flags = 0;
+    policy.PreferSystem32Images = 1;
+    if (::SetProcessMitigationPolicy(ProcessImageLoadPolicy, &policy, sizeof(policy)) == FALSE)
+        return Fail(LastError(ApiCall::ImageLoadPolicy));
+    return {};
+}
+
 } // namespace real

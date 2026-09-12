@@ -101,7 +101,9 @@ target_link_libraries(FullScreenWrapperForDLSS5 PRIVATE dscreen_core dscreen_tra
 # The windows subsystem so a double-click opens no console; mainCRTStartup keeps the ordinary entry point,
 # and the program attaches to the console it was launched from when there is one. The manifest dependency
 # asks for version 6 of the common controls, which is what the panel's sliders and checkboxes come from.
-target_link_options(FullScreenWrapperForDLSS5 PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /MAP
+# The dependent load flag (LOAD_LIBRARY_SEARCH_SYSTEM32) has the loader resolve the executable's own imports
+# from the system folder only, so a library of the same name put beside the program is never taken instead.
+target_link_options(FullScreenWrapperForDLSS5 PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /MAP /DEPENDENTLOADFLAG:0x800
   "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'")
 
 file(GLOB _ngx_dlls "${DLSS_SDK_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll" "${DLSS_SDK_DIR}/lib/Windows_x86_64/nvngx_dlss.dll")
