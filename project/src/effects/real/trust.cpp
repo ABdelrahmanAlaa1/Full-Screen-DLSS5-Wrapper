@@ -1,3 +1,6 @@
+// The chain request the certificate API takes has fields its header offers only under this, and every
+// field of it is named below.
+#define CERT_CHAIN_PARA_HAS_EXTRA_FIELDS
 #include "effects/real/trust.h"
 
 #include <softpub.h>
@@ -8,8 +11,10 @@
 #include <array>
 #include <cstring>
 #include <cwchar>
+#include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -29,6 +34,8 @@ constexpr std::size_t kKeyCapacity = 64;
 // A file may carry signatures after its first, each verified on its own; one with more than this many is
 // refused rather than looped over. NVIDIA's driver files carry two: NVIDIA's own and Microsoft's.
 constexpr DWORD kMaxSecondarySignatures = 15;
+// The certificates a signer's chain is copied from, at most: a chain longer than this is not one NVIDIA signs with.
+constexpr DWORD kMaxChainCertificates = 16;
 
 // The calls a check on one of the files fails with, so a refusal names the file it is about.
 struct Refusals
@@ -36,27 +43,56 @@ struct Refusals
     ApiCall open;
     ApiCall notSigned;
     ApiCall notFromNvidia;
+    ApiCall rootNotTrusted;
 };
 
 [[nodiscard]] Refusals RefusalsOf(ModelKind kind) noexcept
 {
     switch (kind)
     {
-    case ModelKind::NeuralRendering: return Refusals{ ApiCall::OpenModelFile, ApiCall::ModelNotSigned, ApiCall::ModelNotFromNvidia };
-    case ModelKind::SuperResolution: return Refusals{ ApiCall::OpenUpscalerFile, ApiCall::UpscalerNotSigned, ApiCall::UpscalerNotFromNvidia };
-    case ModelKind::OpticalFlow: return Refusals{ ApiCall::OpenOpticalFlowFile, ApiCall::OpticalFlowNotSigned, ApiCall::OpticalFlowNotFromNvidia };
-    case ModelKind::Runtime: return Refusals{ ApiCall::OpenRuntimeFile, ApiCall::RuntimeNotSigned, ApiCall::RuntimeNotFromNvidia };
+    case ModelKind::NeuralRendering: return Refusals{ ApiCall::OpenModelFile, ApiCall::ModelNotSigned, ApiCall::ModelNotFromNvidia, ApiCall::ModelRootNotTrusted };
+    case ModelKind::SuperResolution: return Refusals{ ApiCall::OpenUpscalerFile, ApiCall::UpscalerNotSigned, ApiCall::UpscalerNotFromNvidia, ApiCall::UpscalerRootNotTrusted };
+    case ModelKind::OpticalFlow: return Refusals{ ApiCall::OpenOpticalFlowFile, ApiCall::OpticalFlowNotSigned, ApiCall::OpticalFlowNotFromNvidia, ApiCall::OpticalFlowRootNotTrusted };
+    case ModelKind::Runtime: return Refusals{ ApiCall::OpenRuntimeFile, ApiCall::RuntimeNotSigned, ApiCall::RuntimeNotFromNvidia, ApiCall::RuntimeRootNotTrusted };
     }
-    return Refusals{ ApiCall::OpenModelFile, ApiCall::ModelNotSigned, ApiCall::ModelNotFromNvidia };
+    return Refusals{ ApiCall::OpenModelFile, ApiCall::ModelNotSigned, ApiCall::ModelNotFromNvidia, ApiCall::ModelRootNotTrusted };
 }
 
-// What one verified signature said: whether its signer names NVIDIA, and how many signatures follow the
-// first, which only the first is asked about.
+// What a verified signature's signer turned out to be: not NVIDIA; NVIDIA Corporation by name, but with a
+// chain that does not reach a root on Microsoft's own list; or NVIDIA. Listed in the order of preference.
+enum class Signer : std::uint8_t { Other, NvidiaUnrooted, Nvidia };
+
+// One signer as judged, with the chain's error when it is NVIDIA by name only.
+struct Found
+{
+    Signer signer;
+    DWORD rootError;
+};
+
+// What one verified signature said: who signed it, and how many signatures follow the first, which only
+// the first is asked about.
 struct Signature
 {
-    bool fromNvidia;
+    Found found;
     DWORD secondaries;
 };
+
+[[nodiscard]] Found Better(const Found& a, const Found& b) noexcept
+{
+    return b.signer > a.signer ? b : a;
+}
+
+struct StoreCloser
+{
+    void operator()(void* store) const noexcept { (void)::CertCloseStore(store, 0); }
+};
+using UniqueStore = std::unique_ptr<void, StoreCloser>;
+
+struct ChainFreer
+{
+    void operator()(const CERT_CHAIN_CONTEXT* chain) const noexcept { ::CertFreeCertificateChain(chain); }
+};
+using UniqueChain = std::unique_ptr<const CERT_CHAIN_CONTEXT, ChainFreer>;
 
 // One entry of a version resource's translation table: which language its strings are kept under.
 struct Translation
@@ -125,7 +161,7 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
     };
 
     // Every signature the file carries is verified, the first and each after it, one call each; the first
-    // call also counts the rest. The file passes when each is trusted and any one signer names NVIDIA.
+    // call also counts the rest. The file passes when each is trusted and one of them is NVIDIA's.
     static constexpr auto Verified = [] [[nodiscard]] (const wchar_t* path, void* handle, ModelKind kind) noexcept -> Status<Error> {
         static constexpr auto FileInfoFor = [] [[nodiscard]] (const wchar_t* path, void* handle) noexcept -> WINTRUST_FILE_INFO {
             return WINTRUST_FILE_INFO{ .cbStruct = sizeof(WINTRUST_FILE_INFO), .pcwszFilePath = path, .hFile = handle, .pgKnownSubject = nullptr };
@@ -160,37 +196,104 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
         };
 
         static constexpr auto Answered = [] [[nodiscard]] (WINTRUST_DATA & request, ModelKind kind) noexcept -> Result<Signature, Error> {
-            static constexpr auto NamesNvidia = [] [[nodiscard]] (HANDLE state) noexcept -> bool {
-                static constexpr auto SigningCertificate = [] [[nodiscard]] (HANDLE state) noexcept -> const CERT_CONTEXT* {
-                    static constexpr auto SignerOf = [] [[nodiscard]] (CRYPT_PROVIDER_DATA * provider) noexcept -> CRYPT_PROVIDER_SGNR* {
-                        return provider == nullptr ? nullptr : ::WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0);
-                    };
+            // Who signed: the signer's certificate has to be NVIDIA Corporation by common name, and its chain,
+            // built again here under stricter terms than Windows applied, has to reach a root on Microsoft's own list.
+            static constexpr auto Judged = [] [[nodiscard]] (HANDLE state) noexcept -> Found {
+                static constexpr auto SignerOf = [] [[nodiscard]] (CRYPT_PROVIDER_DATA * provider) noexcept -> CRYPT_PROVIDER_SGNR* {
+                    return provider == nullptr ? nullptr : ::WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0);
+                };
 
-                    static constexpr auto CertificateOf = [] [[nodiscard]] (CRYPT_PROVIDER_SGNR * signer) noexcept -> CRYPT_PROVIDER_CERT* {
-                        return signer == nullptr ? nullptr : ::WTHelperGetProvCertFromChain(signer, 0);
-                    };
-                    CRYPT_PROVIDER_CERT* certificate = CertificateOf(SignerOf(::WTHelperProvDataFromStateData(state)));
-                    return certificate == nullptr ? nullptr : certificate->pCert;
+                static constexpr auto CertificateOf = [] [[nodiscard]] (CRYPT_PROVIDER_SGNR * signer) noexcept -> CRYPT_PROVIDER_CERT* {
+                    return signer == nullptr ? nullptr : ::WTHelperGetProvCertFromChain(signer, 0);
                 };
 
                 // The certificate's common name on its own; the display name would stand in another attribute when there is none.
-                static constexpr auto NameOfCertificate = [] [[nodiscard]] (const CERT_CONTEXT* certificate) noexcept -> std::array<wchar_t, kNameCapacity> {
+                static constexpr auto NamedNvidia = [] [[nodiscard]] (const CERT_CONTEXT* certificate) noexcept -> bool {
                     std::array<wchar_t, kNameCapacity> name{};                                  // WAIVER(R2): a local buffer filled once, before use.
                     std::array<char, sizeof(szOID_COMMON_NAME)> attribute{ szOID_COMMON_NAME }; // the identifier is taken through a pointer to non-const
                     (void)::CertGetNameStringW(certificate, CERT_NAME_ATTR_TYPE, 0, attribute.data(), name.data(), kNameCapacity);
-                    return name;
+                    return ::CompareStringOrdinal(name.data(), -1, kSignerName.data(), -1, TRUE) == CSTR_EQUAL;
                 };
-                const CERT_CONTEXT* certificate = SigningCertificate(state);
-                if (certificate == nullptr)
-                    return false;
-                const std::array<wchar_t, kNameCapacity> name = NameOfCertificate(certificate);
-                return ::CompareStringOrdinal(name.data(), -1, kSignerName.data(), -1, TRUE) == CSTR_EQUAL;
+
+                // The signer's chain built again from two sources only, Microsoft's own root list and the
+                // certificates the signature brought with it, at the moment the signature was verified for,
+                // asked for code signing and answered from the cache: a root anyone put into the ordinary
+                // stores does not count. Zero when the chain is clean and the base policy accepts it;
+                // otherwise the chain's trust status, the policy's error or the call's.
+                static constexpr auto RootTrouble = [] [[nodiscard]] (const CRYPT_PROVIDER_SGNR* signer, const CERT_CONTEXT* certificate) noexcept -> DWORD {
+                    // The signer's own chain less any self-signed certificate, in a store of this call's own.
+                    // A root in it would not be trusted for being there; none is put there to begin with.
+                    static constexpr auto Carried = [] [[nodiscard]] (const CRYPT_PROVIDER_SGNR* signer) noexcept -> UniqueStore {
+                        UniqueStore store(::CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr));
+                        if (store == nullptr)
+                            return store;
+                        for (const CRYPT_PROVIDER_CERT& carried : std::span(signer->pasCertChain, std::min(signer->csCertChain, kMaxChainCertificates)))
+                            if (!carried.fSelfSigned)
+                                (void)::CertAddCertificateContextToStore(store.get(), carried.pCert, CERT_STORE_ADD_REPLACE_EXISTING, nullptr);
+                        return store;
+                    };
+
+                    // WAIVER(R1): every field of the request is named, the ones that want nothing included.
+                    static constexpr auto Built = [] [[nodiscard]] (const CRYPT_PROVIDER_SGNR* signer, const CERT_CONTEXT* certificate, void* carried) noexcept -> Result<UniqueChain, DWORD> {
+                        std::array<char, sizeof(szOID_PKIX_KP_CODE_SIGNING)> codeSigning{ szOID_PKIX_KP_CODE_SIGNING }; // the usage is taken through pointers to non-const
+                        std::array<LPSTR, 1> usages{ codeSigning.data() };
+                        // WAIVER(R2): the request and the time are handed over by non-const pointer; the call writes neither.
+                        CERT_CHAIN_PARA request{ .cbSize = sizeof(CERT_CHAIN_PARA),
+                                                 .RequestedUsage =
+                                                     CERT_USAGE_MATCH{ .dwType = USAGE_MATCH_TYPE_AND, .Usage = CERT_ENHKEY_USAGE{ .cUsageIdentifier = 1, .rgpszUsageIdentifier = usages.data() } },
+                                                 .RequestedIssuancePolicy =
+                                                     CERT_USAGE_MATCH{ .dwType = USAGE_MATCH_TYPE_AND, .Usage = CERT_ENHKEY_USAGE{ .cUsageIdentifier = 0, .rgpszUsageIdentifier = nullptr } },
+                                                 .dwUrlRetrievalTimeout = 0,
+                                                 .fCheckRevocationFreshnessTime = FALSE,
+                                                 .dwRevocationFreshnessTime = 0,
+                                                 .pftCacheResync = nullptr,
+                                                 .pStrongSignPara = nullptr,
+                                                 .dwStrongSignFlags = 0 };
+                        FILETIME asOf = signer->sftVerifyAsOf;
+                        const CERT_CHAIN_CONTEXT* chain = nullptr; // WAIVER(R2): the answer of one call, read once after it.
+                        if (::CertGetCertificateChain(HCCE_LOCAL_MACHINE, certificate, &asOf, carried, &request, CERT_CHAIN_ONLY_ADDITIONAL_AND_AUTH_ROOT | CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL,
+                                                      nullptr, &chain) == FALSE)
+                        {
+                            const DWORD error = ::GetLastError();
+                            return Fail(error == 0 ? static_cast<DWORD>(TRUST_E_SYSTEM_ERROR) : error);
+                        }
+                        return UniqueChain(chain);
+                    };
+
+                    // Clean is no trust error at all, and the base policy content with that.
+                    static constexpr auto Trouble = [] [[nodiscard]] (const CERT_CHAIN_CONTEXT* chain) noexcept -> DWORD {
+                        if (chain->TrustStatus.dwErrorStatus != CERT_TRUST_NO_ERROR)
+                            return chain->TrustStatus.dwErrorStatus;
+                        CERT_CHAIN_POLICY_PARA policy{ .cbSize = sizeof(CERT_CHAIN_POLICY_PARA), .dwFlags = 0, .pvExtraPolicyPara = nullptr }; // WAIVER(R2): by non-const pointer; not written.
+                        CERT_CHAIN_POLICY_STATUS status{
+                            .cbSize = sizeof(CERT_CHAIN_POLICY_STATUS), .dwError = 0, .lChainIndex = -1, .lElementIndex = -1, .pvExtraPolicyStatus = nullptr
+                        }; // WAIVER(R2): the call writes its answer into it.
+                        if (::CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_BASE, chain, &policy, &status) == FALSE)
+                            return static_cast<DWORD>(TRUST_E_FAIL);
+                        return status.dwError;
+                    };
+                    const UniqueStore carried = Carried(signer);
+                    if (carried == nullptr)
+                        return static_cast<DWORD>(TRUST_E_SYSTEM_ERROR);
+                    const Result<UniqueChain, DWORD> chain = Built(signer, certificate, carried.get());
+                    if (!chain.has_value())
+                        return chain.error();
+                    return Trouble(chain->get());
+                };
+                CRYPT_PROVIDER_SGNR* signer = SignerOf(::WTHelperProvDataFromStateData(state));
+                CRYPT_PROVIDER_CERT* certificate = CertificateOf(signer);
+                if (certificate == nullptr || !NamedNvidia(certificate->pCert))
+                    return Found{ Signer::Other, 0 };
+                const DWORD trouble = RootTrouble(signer, certificate->pCert);
+                if (trouble != 0)
+                    return Found{ Signer::NvidiaUnrooted, trouble };
+                return Found{ Signer::Nvidia, 0 };
             };
 
             static constexpr auto Read = [] [[nodiscard]] (const WINTRUST_DATA& request, LONG verdict, ModelKind kind) noexcept -> Result<Signature, Error> {
                 if (verdict != ERROR_SUCCESS)
                     return Fail(Error{ RefusalsOf(kind).notSigned, static_cast<std::uint32_t>(verdict) });
-                return Signature{ NamesNvidia(request.hWVTStateData), request.pSignatureSettings->cSecondarySigs };
+                return Signature{ Judged(request.hWVTStateData), request.pSignatureSettings->cSecondarySigs };
             };
 
             // The verification allocates state that has to be given back whatever the answer was.
@@ -210,22 +313,26 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
             return Answered(request, kind);
         };
 
-        // The signatures after the first, each verified on its own. The fold carries whether any signer so
-        // far names NVIDIA, and a signature that is not trusted ends it with that refusal.
+        // The signatures after the first, each verified on its own. The fold keeps the best signer found so
+        // far, and a signature that is not trusted ends it with that refusal.
         static constexpr auto Rest = [] [[nodiscard]] (WINTRUST_FILE_INFO * file, const Signature& first, ModelKind kind) noexcept -> Status<Error> {
-            static constexpr auto Named = [] [[nodiscard]] (WINTRUST_FILE_INFO * file, const Signature& first, ModelKind kind) noexcept -> Result<bool, Error> {
-                return std::ranges::fold_left(std::views::iota(DWORD{ 1 }, first.secondaries + 1), Result<bool, Error>{ first.fromNvidia }, [file, kind](Result<bool, Error> named, DWORD index) {
-                    return named.and_then(
-                        [file, kind, index](bool nvidia) { return Checked(file, index, WSS_VERIFY_SPECIFIC, kind).transform([nvidia](const Signature& s) { return nvidia || s.fromNvidia; }); });
+            static constexpr auto Best = [] [[nodiscard]] (WINTRUST_FILE_INFO * file, const Signature& first, ModelKind kind) noexcept -> Result<Found, Error> {
+                return std::ranges::fold_left(std::views::iota(DWORD{ 1 }, first.secondaries + 1), Result<Found, Error>{ first.found }, [file, kind](Result<Found, Error> best, DWORD index) {
+                    return best.and_then(
+                        [file, kind, index](const Found& found) { return Checked(file, index, WSS_VERIFY_SPECIFIC, kind).transform([found](const Signature& s) { return Better(found, s.found); }); });
                 });
+            };
+
+            static constexpr auto Accepted = [] [[nodiscard]] (const Found& best, ModelKind kind) noexcept -> Status<Error> {
+                if (best.signer == Signer::Nvidia)
+                    return {};
+                if (best.signer == Signer::NvidiaUnrooted)
+                    return Fail(Error{ RefusalsOf(kind).rootNotTrusted, best.rootError });
+                return Fail(Error{ RefusalsOf(kind).notFromNvidia, 0 });
             };
             if (first.secondaries > kMaxSecondarySignatures)
                 return Fail(Error{ RefusalsOf(kind).notSigned, kSignaturesUnchecked });
-            return Named(file, first, kind).and_then([kind](bool nvidia) -> Status<Error> {
-                if (!nvidia)
-                    return Fail(Error{ RefusalsOf(kind).notFromNvidia, 0 });
-                return {};
-            });
+            return Best(file, first, kind).and_then([kind](const Found& best) { return Accepted(best, kind); });
         };
         WINTRUST_FILE_INFO file = FileInfoFor(path, handle);
         return Checked(&file, 0, WSS_VERIFY_SPECIFIC | WSS_GET_SECONDARY_SIG_COUNT, kind).and_then([&file, kind](const Signature& first) { return Rest(&file, first, kind); });

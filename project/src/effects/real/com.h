@@ -107,6 +107,10 @@ enum class ApiCall : std::uint8_t {
     OpenRuntimeFile, // and on the NGX runtime, _nvngx.dll or nvngx.dll, when a copy sits beside the program
     RuntimeNotSigned,
     RuntimeNotFromNvidia,
+    ModelRootNotTrusted, // the NVIDIA signer's chain does not reach a root on Microsoft's own list; one for each file, as above
+    UpscalerRootNotTrusted,
+    OpticalFlowRootNotTrusted,
+    RuntimeRootNotTrusted,
     ImageLoadPolicy,
     TextureDescriptionMismatch,
     PlanFrame,

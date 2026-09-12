@@ -97,6 +97,15 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::OpenRuntimeFile: return "opening the NGX runtime beside the program to check its signature";
     case ApiCall::RuntimeNotSigned: return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) has no signature Windows trusts. It is not the correct file.";
     case ApiCall::RuntimeNotFromNvidia: return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) is signed, but none of its signers is NVIDIA. It is not the correct file.";
+    case ApiCall::ModelRootNotTrusted:
+        return "ERROR: nvngx_dlssnr.dll is signed as NVIDIA Corporation, but the signature's chain does not reach a root on Microsoft's own trusted root list. It is not the correct file.";
+    case ApiCall::UpscalerRootNotTrusted:
+        return "ERROR: nvngx_dlss.dll is signed as NVIDIA Corporation, but the signature's chain does not reach a root on Microsoft's own trusted root list. It is not the correct file.";
+    case ApiCall::OpticalFlowRootNotTrusted:
+        return "ERROR: nvofapi64.dll is signed as NVIDIA Corporation, but the signature's chain does not reach a root on Microsoft's own trusted root list. It is not the correct file.";
+    case ApiCall::RuntimeRootNotTrusted:
+        return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) is signed as NVIDIA Corporation, but the signature's chain does not reach a root on Microsoft's own trusted root "
+               "list. It is not the correct file.";
     case ApiCall::ImageLoadPolicy: return "asking Windows to take a library from its own folder before the program's";
     case ApiCall::NgxNeuralRenderingUnavailable:
         return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
@@ -190,6 +199,20 @@ ErrorText Describe(const Error& error) noexcept
         return SignatureText("nvofapi64.dll", error.code);
     if (error.call == ApiCall::RuntimeNotSigned)
         return SignatureText("the NGX runtime beside the program (_nvngx.dll or nvngx.dll)", error.code);
+    // A signer named NVIDIA Corporation whose chain, built again from Microsoft's own root list alone, was
+    // not clean: the code is the chain's trust status, or the policy's error, whichever said so.
+    static constexpr auto RootText = [] [[nodiscard]] (std::string_view file, std::uint32_t code) noexcept -> ErrorText {
+        return infra::Formatted<ErrorText::Capacity>(
+            "ERROR: {} is signed as NVIDIA Corporation, but the signature's chain does not reach a root on Microsoft's own trusted root list (0x{:08X}). It is not the correct file.", file, code);
+    };
+    if (error.call == ApiCall::ModelRootNotTrusted)
+        return RootText("nvngx_dlssnr.dll", error.code);
+    if (error.call == ApiCall::UpscalerRootNotTrusted)
+        return RootText("nvngx_dlss.dll", error.code);
+    if (error.call == ApiCall::OpticalFlowRootNotTrusted)
+        return RootText("nvofapi64.dll", error.code);
+    if (error.call == ApiCall::RuntimeRootNotTrusted)
+        return RootText("the NGX runtime beside the program (_nvngx.dll or nvngx.dll)", error.code);
     // No call fails with a code of zero, so a zero is an error that has said all it has to say.
     if (error.code == 0)
         return infra::Formatted<ErrorText::Capacity>("{}", Describe(error.call));
