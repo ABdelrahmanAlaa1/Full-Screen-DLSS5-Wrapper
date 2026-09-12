@@ -2,6 +2,8 @@
 
 #include "interior/pyramid.h"
 
+#include <algorithm>
+
 namespace real {
 namespace {
 
@@ -10,6 +12,10 @@ using infra::Result;
 using infra::Status;
 
 using CreateInstance = NV_OF_STATUS(NVOFAPI*)(uint32_t, NV_OF_D3D12_API_FUNCTION_LIST*);
+
+// The library is the driver's, installed to the system folder, and is asked for there by its full path.
+constexpr std::wstring_view kOpticalFlowLibrary = L"\\nvofapi64.dll";
+constexpr std::size_t kLibraryPathCapacity = MAX_PATH + kOpticalFlowLibrary.size() + 1;
 
 constexpr auto kZeroLevel = interior::LevelIndexTag::Parse(0);
 static_assert(kZeroLevel.has_value());
@@ -31,6 +37,7 @@ struct Registration
 
 struct Loaded
 {
+    TrustedFile file;
     UniqueModule library;
     NV_OF_D3D12_API_FUNCTION_LIST api;
 };
@@ -55,9 +62,21 @@ void BufferUnregister::operator()(NvOFGPUBufferHandle buffer) const noexcept
 
 Result<OpticalFlow, Error> CreateOpticalFlow(const GpuDevice& gpu, const interior::SessionPlan& plan, const ResourceTable& resources) noexcept
 {
+    // Named by its full path in the system folder, so the folder the executable sits in is never searched
+    // for it, and its own imports are confined to the system folder too. Before it is loaded it is checked
+    // and held the way the models are.
     static constexpr auto LoadApi = [] [[nodiscard]] () noexcept -> Result<Loaded, Error> {
-        static constexpr auto LoadedLibrary = [] [[nodiscard]] () noexcept -> Result<UniqueModule, Error> {
-            HMODULE module = ::LoadLibraryW(L"nvofapi64.dll");
+        static constexpr auto LibraryPath = [] [[nodiscard]] () noexcept -> Result<interior::FilePath, Error> {
+            std::array<wchar_t, kLibraryPathCapacity> chars{}; // WAIVER(R2): a local buffer filled once, before use, from two bounded pieces.
+            const UINT length = ::GetSystemDirectoryW(chars.data(), MAX_PATH);
+            if (length == 0 || length >= MAX_PATH)
+                return Fail(LastError(ApiCall::LoadOpticalFlow));
+            std::ranges::copy(kOpticalFlowLibrary, chars.begin() + static_cast<std::ptrdiff_t>(length));
+            return interior::FilePath::Parse(chars.data()).transform_error([](infra::StringTooLong) { return Error{ ApiCall::LoadOpticalFlow, 0 }; });
+        };
+
+        static constexpr auto LoadedLibrary = [] [[nodiscard]] (const interior::FilePath& path) noexcept -> Result<UniqueModule, Error> {
+            HMODULE module = ::LoadLibraryExW(path.CString(), nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (module == nullptr)
                 return Fail(LastError(ApiCall::LoadOpticalFlow));
             return UniqueModule(module);
@@ -74,8 +93,14 @@ Result<OpticalFlow, Error> CreateOpticalFlow(const GpuDevice& gpu, const interio
             NV_OF_D3D12_API_FUNCTION_LIST api{};
             return CheckFlow(create(NV_OF_API_VERSION, &api), ApiCall::OpticalFlowCreate).transform([&api] { return api; });
         };
-        return LoadedLibrary().and_then([](UniqueModule library) {
-            return EntryPoint(library.get()).and_then(ApiOf).transform([&library](const NV_OF_D3D12_API_FUNCTION_LIST& api) { return Loaded{ std::move(library), api }; });
+        return LibraryPath().and_then([](const interior::FilePath& path) {
+            return OpenTrusted(path, ModelKind::OpticalFlow).and_then([&path](TrustedFile file) {
+                return LoadedLibrary(path).and_then([&file](UniqueModule library) {
+                    return EntryPoint(library.get()).and_then(ApiOf).transform([&file, &library](const NV_OF_D3D12_API_FUNCTION_LIST& api) {
+                        return Loaded{ std::move(file), std::move(library), api };
+                    });
+                });
+            });
         });
     };
 
@@ -158,7 +183,7 @@ Result<OpticalFlow, Error> CreateOpticalFlow(const GpuDevice& gpu, const interio
             return RegisteredResource(r, resources, LumaIdOf(0)).and_then([&](RegisteredBuffer first) {
                 return RegisteredResource(r, resources, LumaIdOf(1)).and_then([&](RegisteredBuffer second) {
                     return RegisteredResource(r, resources, interior::SimpleId(interior::ResourceKind::OpticalFlowOutput)).transform([&](RegisteredBuffer flow) {
-                        return OpticalFlow{ std::move(loaded.library), loaded.api, std::move(session), completion, { std::move(first), std::move(second) }, std::move(flow) };
+                        return OpticalFlow{ std::move(loaded.file), std::move(loaded.library), loaded.api, std::move(session), completion, { std::move(first), std::move(second) }, std::move(flow) };
                     });
                 });
             });

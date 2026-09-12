@@ -16,8 +16,9 @@ struct TrustedFile
     ProductName product; // what the file calls its product, or nothing when it says: read once the file is held, so it is this file's
 };
 
-// Which of NVIDIA's files is being checked, which is what a refusal names.
-enum class ModelKind : std::uint8_t { NeuralRendering, SuperResolution };
+// Which of NVIDIA's files is being checked, which is what a refusal names: the two models, and the
+// driver's optical flow library.
+enum class ModelKind : std::uint8_t { NeuralRendering, SuperResolution, OpticalFlow };
 
 // Verifies every Authenticode signature the file carries, the first and each one after it, and fails
 // unless each is trusted and one of their signers names NVIDIA; only then is the product name read, which

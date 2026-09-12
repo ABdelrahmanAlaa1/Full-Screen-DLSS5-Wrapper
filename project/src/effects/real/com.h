@@ -101,6 +101,9 @@ enum class ApiCall : std::uint8_t {
     OpenUpscalerFile, // the same three checks on nvngx_dlss.dll, which a refusal has to name instead
     UpscalerNotSigned,
     UpscalerNotFromNvidia,
+    OpenOpticalFlowFile, // and on nvofapi64.dll, the driver's optical flow library, taken from the system folder
+    OpticalFlowNotSigned,
+    OpticalFlowNotFromNvidia,
     TextureDescriptionMismatch,
     PlanFrame,
     LoadOpticalFlow,

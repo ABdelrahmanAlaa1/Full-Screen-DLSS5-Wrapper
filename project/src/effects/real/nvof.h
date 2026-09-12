@@ -1,5 +1,6 @@
 #pragma once
 #include "effects/real/resources.h"
+#include "effects/real/trust.h"
 #include "interior/plan.h"
 
 #include <nvOpticalFlowCommon.h>
@@ -33,6 +34,7 @@ using RegisteredBuffer = std::unique_ptr<std::remove_pointer_t<NvOFGPUBufferHand
 
 struct OpticalFlow
 {
+    TrustedFile file; // held open so the file that was checked is the file that was loaded, for as long as it is
     UniqueModule library;
     NV_OF_D3D12_API_FUNCTION_LIST api;
     OpticalFlowSession session;
