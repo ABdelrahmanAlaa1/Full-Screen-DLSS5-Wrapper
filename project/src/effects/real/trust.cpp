@@ -22,8 +22,8 @@ using infra::Status;
 
 // WINTRUST_ACTION_GENERIC_VERIFY_V2 is a macro over an initialiser, so it is named once here. The call
 // takes a mutable pointer to it and does not write through it.
-GUID kVerifyAction = WINTRUST_ACTION_GENERIC_VERIFY_V2; // WAIVER(R2): a constant the API insists on being handed by non-const pointer.
-constexpr std::wstring_view kSigner = L"NVIDIA";
+GUID kVerifyAction = WINTRUST_ACTION_GENERIC_VERIFY_V2;          // WAIVER(R2): a constant the API insists on being handed by non-const pointer.
+constexpr std::wstring_view kSignerName = L"NVIDIA Corporation"; // the common name of NVIDIA's signing certificates, compared whole
 constexpr std::size_t kNameCapacity = 256;
 constexpr std::size_t kKeyCapacity = 64;
 // A file may carry signatures after its first, each verified on its own; one with more than this many is
@@ -173,16 +173,18 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
                     return certificate == nullptr ? nullptr : certificate->pCert;
                 };
 
+                // The certificate's common name on its own; the display name would stand in another attribute when there is none.
                 static constexpr auto NameOfCertificate = [] [[nodiscard]] (const CERT_CONTEXT* certificate) noexcept -> std::array<wchar_t, kNameCapacity> {
-                    std::array<wchar_t, kNameCapacity> name{}; // WAIVER(R2): a local buffer filled once, before use.
-                    (void)::CertGetNameStringW(certificate, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nullptr, name.data(), kNameCapacity);
+                    std::array<wchar_t, kNameCapacity> name{};                                  // WAIVER(R2): a local buffer filled once, before use.
+                    std::array<char, sizeof(szOID_COMMON_NAME)> attribute{ szOID_COMMON_NAME }; // the identifier is taken through a pointer to non-const
+                    (void)::CertGetNameStringW(certificate, CERT_NAME_ATTR_TYPE, 0, attribute.data(), name.data(), kNameCapacity);
                     return name;
                 };
                 const CERT_CONTEXT* certificate = SigningCertificate(state);
                 if (certificate == nullptr)
                     return false;
                 const std::array<wchar_t, kNameCapacity> name = NameOfCertificate(certificate);
-                return std::wstring_view(name.data()).starts_with(kSigner);
+                return ::CompareStringOrdinal(name.data(), -1, kSignerName.data(), -1, TRUE) == CSTR_EQUAL;
             };
 
             static constexpr auto Read = [] [[nodiscard]] (const WINTRUST_DATA& request, LONG verdict, ModelKind kind) noexcept -> Result<Signature, Error> {

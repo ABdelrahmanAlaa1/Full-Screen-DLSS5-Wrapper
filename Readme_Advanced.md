@@ -106,8 +106,8 @@ holds it. `nvngx_dlss.dll` (super resolution, feature 1) is NVIDIA's too, and is
 session runs without super resolution, and the panel says so beside a warning glyph.
 
 Because the NGX loader picks these files up by name from a folder anyone can write to, this tool checks
-whichever of them it finds in one of those folders before the loader gets there: Windows must accept every Authenticode signature the file carries (a driver file often carries NVIDIA's and Microsoft's), and one of the signers'
-names must begin with NVIDIA. A file that fails either stops the session before NGX is so much as initialised. One that passes is then asked what its version resource calls its product:
+whichever of them it finds in one of those folders before the loader gets there: Windows must accept every Authenticode signature the file carries (a driver file often carries NVIDIA's and Microsoft's), and one of the signers
+must be NVIDIA Corporation by name. A file that fails either stops the session before NGX is so much as initialised. One that passes is then asked what its version resource calls its product:
 `nvngx_dlssnr.dll` is expected to say `NVIDIA DLSSNR`, and one that says something else is used anyway, under a warning in the log and a glyph beside the model's switch on the panel, since it may be some other file of NVIDIA's under the model's name, or a later model. Each is then held open, shared for reading only,
 for as long as the session runs, so it cannot be written to, deleted or renamed afterwards — the file that
 was checked is the file that loads. A model that is not in one of those folders is not checked: super
