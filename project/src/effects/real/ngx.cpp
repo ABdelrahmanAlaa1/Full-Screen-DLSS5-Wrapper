@@ -26,6 +26,7 @@ constexpr char kNeuralRenderingAvailable[] = "DLSSNR.Available";
 constexpr std::array<const char*, 2> kPresetCountNames{ "DLSSNR.PresetCount", "DLSSNR.Presets" };
 constexpr std::wstring_view kNeuralRenderingModel = L"\\nvngx_dlssnr.dll";
 constexpr std::wstring_view kSuperResolutionModel = L"\\nvngx_dlss.dll";
+constexpr std::array<std::wstring_view, 2> kRuntimeNames{ L"\\_nvngx.dll", L"\\nvngx.dll" };
 constexpr std::size_t kModelPathCapacity = interior::DirectoryPath::Capacity + std::max(kNeuralRenderingModel.size(), kSuperResolutionModel.size()) + 1;
 
 [[nodiscard]] std::array<wchar_t, kModelPathCapacity> ModelPathIn(std::wstring_view directory, std::wstring_view model) noexcept
@@ -266,6 +267,18 @@ std::optional<interior::FilePath> NeuralRenderingModelFile(const NgxSettings& se
 std::optional<interior::FilePath> SuperResolutionModelFile(const NgxSettings& settings) noexcept
 {
     return ModelFile(settings, kSuperResolutionModel);
+}
+
+RuntimeFiles NgxRuntimeFilesBeside(const NgxSettings& settings) noexcept
+{
+    static constexpr auto FileIn = [] [[nodiscard]] (const interior::DirectoryPath& directory, std::wstring_view name) noexcept -> std::optional<interior::FilePath> {
+        if (directory.IsEmpty() || ::GetFileAttributesW(ModelPathIn(directory.Get(), name).data()) == INVALID_FILE_ATTRIBUTES)
+            return std::nullopt;
+        return interior::FilePath::Parse(ModelPathIn(directory.Get(), name).data())
+            .transform([](const interior::FilePath& path) { return std::optional<interior::FilePath>{ path }; })
+            .value_or(std::nullopt);
+    };
+    return RuntimeFiles{ FileIn(settings.executableDirectory, kRuntimeNames[0]), FileIn(settings.executableDirectory, kRuntimeNames[1]) };
 }
 
 Requirement RequirementOf(const GpuDevice& gpu, const NgxSettings& settings, NVSDK_NGX_Feature feature) noexcept

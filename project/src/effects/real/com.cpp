@@ -94,6 +94,9 @@ std::string_view Describe(ApiCall call) noexcept
     case ApiCall::OpenOpticalFlowFile: return "opening nvofapi64.dll in the system folder to check its signature";
     case ApiCall::OpticalFlowNotSigned: return "ERROR: nvofapi64.dll has no signature Windows trusts. It is not the correct file.";
     case ApiCall::OpticalFlowNotFromNvidia: return "ERROR: nvofapi64.dll is signed, but none of its signers is NVIDIA. It is not the correct file.";
+    case ApiCall::OpenRuntimeFile: return "opening the NGX runtime beside the program to check its signature";
+    case ApiCall::RuntimeNotSigned: return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) has no signature Windows trusts. It is not the correct file.";
+    case ApiCall::RuntimeNotFromNvidia: return "ERROR: the NGX runtime beside the program (_nvngx.dll or nvngx.dll) is signed, but none of its signers is NVIDIA. It is not the correct file.";
     case ApiCall::NgxNeuralRenderingUnavailable:
         return "DLSS 5 Neural Rendering is unavailable: the NGX loader found nvngx_dlssnr.dll but would not build the feature from it (DLSSNR.Available = 0). Run with --ngx-log 2 for "
                "the loader's own account of why.";
@@ -184,6 +187,8 @@ ErrorText Describe(const Error& error) noexcept
         return SignatureText("nvngx_dlss.dll", error.code);
     if (error.call == ApiCall::OpticalFlowNotSigned)
         return SignatureText("nvofapi64.dll", error.code);
+    if (error.call == ApiCall::RuntimeNotSigned)
+        return SignatureText("the NGX runtime beside the program (_nvngx.dll or nvngx.dll)", error.code);
     // No call fails with a code of zero, so a zero is an error that has said all it has to say.
     if (error.code == 0)
         return infra::Formatted<ErrorText::Capacity>("{}", Describe(error.call));

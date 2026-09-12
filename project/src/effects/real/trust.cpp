@@ -45,6 +45,7 @@ struct Refusals
     case ModelKind::NeuralRendering: return Refusals{ ApiCall::OpenModelFile, ApiCall::ModelNotSigned, ApiCall::ModelNotFromNvidia };
     case ModelKind::SuperResolution: return Refusals{ ApiCall::OpenUpscalerFile, ApiCall::UpscalerNotSigned, ApiCall::UpscalerNotFromNvidia };
     case ModelKind::OpticalFlow: return Refusals{ ApiCall::OpenOpticalFlowFile, ApiCall::OpticalFlowNotSigned, ApiCall::OpticalFlowNotFromNvidia };
+    case ModelKind::Runtime: return Refusals{ ApiCall::OpenRuntimeFile, ApiCall::RuntimeNotSigned, ApiCall::RuntimeNotFromNvidia };
     }
     return Refusals{ ApiCall::OpenModelFile, ApiCall::ModelNotSigned, ApiCall::ModelNotFromNvidia };
 }

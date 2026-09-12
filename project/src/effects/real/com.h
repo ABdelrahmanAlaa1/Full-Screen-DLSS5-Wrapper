@@ -104,6 +104,9 @@ enum class ApiCall : std::uint8_t {
     OpenOpticalFlowFile, // and on nvofapi64.dll, the driver's optical flow library, taken from the system folder
     OpticalFlowNotSigned,
     OpticalFlowNotFromNvidia,
+    OpenRuntimeFile, // and on the NGX runtime, _nvngx.dll or nvngx.dll, when a copy sits beside the program
+    RuntimeNotSigned,
+    RuntimeNotFromNvidia,
     TextureDescriptionMismatch,
     PlanFrame,
     LoadOpticalFlow,

@@ -42,6 +42,13 @@ struct NgxSettings
 // mean super resolution is unavailable: the driver carries a copy of its own, which the driver store keeps.
 [[nodiscard]] std::optional<interior::FilePath> SuperResolutionModelFile(const NgxSettings& settings) noexcept;
 
+// The NGX runtime under either of its names, _nvngx.dll then nvngx.dll, when a copy sits in the folder the
+// executable sits in: NVIDIA's loader takes one from there before the driver's own, and the folder is one
+// anyone may write to, so one found there is checked before the loader is let at it. Nothing for a name
+// with no file under it.
+using RuntimeFiles = std::array<std::optional<interior::FilePath>, 2>;
+[[nodiscard]] RuntimeFiles NgxRuntimeFilesBeside(const NgxSettings& settings) noexcept;
+
 // The driver keeps the path pointers, so an NgxPaths lives on the heap and never moves.
 class NgxPaths final
 {
