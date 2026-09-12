@@ -1,5 +1,6 @@
 #include "effects/real/exclusion.h"
 
+#include "global_common.h"
 #include "infrastructure/text.h"
 
 #include <windows.ui.h>
@@ -17,7 +18,7 @@ using ABI::Windows::Graphics::Capture::IGraphicsCaptureSession;
 using ABI::Windows::UI::WindowId;
 
 // Every step is written to a file of its own: it fails in a way that reads as success.
-constexpr wchar_t kNotesFile[] = L"FullScreenWrapperForDLSS5-exclusion.log";
+constexpr wchar_t kNotesFile[] = DSCREEN_WIDE(DSCREEN_FILE_STEM) L"-exclusion.log";
 
 [[nodiscard]] bool& Wanted() noexcept
 {

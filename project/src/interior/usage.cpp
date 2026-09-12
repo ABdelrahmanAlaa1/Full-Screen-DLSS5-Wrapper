@@ -1,12 +1,16 @@
+#include "global_common.h"
 #include "interior/options.h"
 
 namespace interior {
 
 std::string_view UsageText() noexcept
 {
-    return "Full-Screen Wrapper for DLSS5 - DLSS 5 Neural Rendering for the live desktop\n"
+    // The block is aligned by hand; the formatter would set it against the literal after the name instead.
+    // clang-format off
+    return DSCREEN_PRODUCT_NAME
+           " - DLSS 5 Neural Rendering for the live desktop\n"
            "\n"
-           "Usage: FullScreenWrapperForDLSS5.exe [options]\n"
+           "Usage: " DSCREEN_FILE_STEM ".exe [options]\n"
            "\n"
            "Capture and output\n"
            "  --list-monitors            List monitors and exit\n"
@@ -105,7 +109,7 @@ std::string_view UsageText() noexcept
            "                             Windows that offers it; where it works, the overlay and the panel\n"
            "                             can be screenshotted and recorded (default on for this branch)\n"
            "  --exclusion-log on|off     Write the capture-exclusion notes to\n"
-           "                             FullScreenWrapperForDLSS5-exclusion.log beside the executable\n"
+           "                             " DSCREEN_FILE_STEM "-exclusion.log beside the executable\n"
            "                             (default off). They say what the capture was asked to leave out and\n"
            "                             what it answered, which is what to send if the overlay feeds back\n"
            "                             into its own capture\n"
@@ -120,6 +124,7 @@ std::string_view UsageText() noexcept
            "  Ctrl+Alt+Shift+C           Toggle the split comparison view\n"
            "  Ctrl+Alt+Shift+Q           Quit\n"
            "  Ctrl+Alt+Shift + mouse     Drag the split divider; no click, so the desktop keeps its input\n";
+    // clang-format on
 }
 
 } // namespace interior

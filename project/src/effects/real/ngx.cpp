@@ -1,5 +1,6 @@
 #include "effects/real/ngx.h"
 
+#include "global_common.h"
 #include "infrastructure/fold.h"
 #include "infrastructure/overloaded.h"
 

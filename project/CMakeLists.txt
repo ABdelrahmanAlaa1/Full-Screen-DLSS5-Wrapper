@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
-project(FullScreenWrapperForDLSS5 VERSION 0.2.0 LANGUAGES CXX)
+
+# The version is written once, in src/global_common.h, where the program and its version resource read it.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/global_common.h" _version_lines REGEX "^#define DSCREEN_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")
+foreach(_part MAJOR MINOR PATCH)
+  if(NOT _version_lines MATCHES "DSCREEN_VERSION_${_part} ([0-9]+)")
+    message(FATAL_ERROR "src/global_common.h does not define DSCREEN_VERSION_${_part}")
+  endif()
+  set(DSCREEN_VERSION_${_part} "${CMAKE_MATCH_1}")
+endforeach()
+project(FullScreenWrapperForDLSS5 VERSION ${DSCREEN_VERSION_MAJOR}.${DSCREEN_VERSION_MINOR}.${DSCREEN_VERSION_PATCH} LANGUAGES CXX)
 
 # Layout:
 #   src/infrastructure  generic primitives, contracts, tracing (the only metaprogramming)

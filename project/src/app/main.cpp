@@ -9,6 +9,7 @@
 #include "effects/real/panel.h"
 #include "effects/real/trust.h"
 #include "effects/real/window.h"
+#include "global_common.h"
 #include "infrastructure/array_util.h"
 #include "infrastructure/fold.h"
 #include "infrastructure/text.h"
@@ -90,7 +91,7 @@ struct Arguments
 
 [[nodiscard]] int ReportEarly(const Error& error) noexcept
 {
-    const Line line = infra::Formatted<kLineCapacity>("Full-Screen Wrapper for DLSS5: {}\n", real::Describe(error).Get());
+    const Line line = infra::Formatted<kLineCapacity>(DSCREEN_PRODUCT_NAME ": {}\n", real::Describe(error).Get());
     real::ShowMessage(line.Get());
     return real::WriteText(stderr, line.Get()).transform([] { return kExitFailure; }).value_or(kExitFailure);
 }
@@ -412,7 +413,7 @@ struct Ended
                             // Each is its own error, so the message the operator sees says which; the log adds where the file was.
                             static constexpr auto ZeroAvailabilityText = [] [[nodiscard]] (const std::optional<interior::DirectoryPath>& model) noexcept -> Line {
                                 if (!model.has_value())
-                                    return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 and there is no nvngx_dlssnr.dll next to FullScreenWrapperForDLSS5.exe or in "
+                                    return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 and there is no nvngx_dlssnr.dll next to " DSCREEN_FILE_STEM ".exe or in "
                                                                            "--ngx-path");
                                 const std::array<char, interior::DirectoryPath::Capacity + 1> directory = infra::NarrowedChars<interior::DirectoryPath::Capacity + 1>(model->Get());
                                 return infra::Formatted<kLineCapacity>("the NGX loader reports DLSSNR.Available = 0 although nvngx_dlssnr.dll is in {}; the loader rejected that build",

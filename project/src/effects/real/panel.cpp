@@ -1,6 +1,7 @@
 #include "effects/real/panel.h"
 
 #include "effects/real/window.h"
+#include "global_common.h"
 #include "infrastructure/array_util.h"
 #include "infrastructure/text.h"
 #include "interior/ngx_params.h"
@@ -24,9 +25,9 @@ namespace {
 using infra::Fail;
 using infra::Result;
 
-constexpr wchar_t kPanelClass[] = L"FullScreenWrapperForDLSS5ControlPanel";
-constexpr wchar_t kCrosshairClass[] = L"FullScreenWrapperForDLSS5WindowPicker";
-constexpr wchar_t kOutlineClass[] = L"FullScreenWrapperForDLSS5PickOutline";
+constexpr wchar_t kPanelClass[] = DSCREEN_WIDE(DSCREEN_FILE_STEM) L"ControlPanel";
+constexpr wchar_t kCrosshairClass[] = DSCREEN_WIDE(DSCREEN_FILE_STEM) L"WindowPicker";
+constexpr wchar_t kOutlineClass[] = DSCREEN_WIDE(DSCREEN_FILE_STEM) L"PickOutline";
 constexpr int kCrosshairWidth = 34;
 constexpr int kReferenceDpi = 96;
 // The longest text a control shows is a window's title. A write is skipped only when all of it reads back,
@@ -259,9 +260,9 @@ struct NoteSpec
 };
 
 constexpr std::array<NoteSpec, kNoteCount> kNotes{ {
-    { L"Full-Screen Wrapper for DLSS5, version " DSCREEN_VERSION_STRING, 1 },
+    { DSCREEN_WIDE(DSCREEN_PRODUCT_NAME) L", version " DSCREEN_WIDE(DSCREEN_VERSION_STRING), 1 },
     { L"An experimental tool that runs NVIDIA's DLSS 5 Neural Rendering model on the desktop, or on one window. It is not an NVIDIA product, and the model file is not included with it.", 3 },
-    { L"Source code, releases and issues: <a href=\"https://github.com/ThioJoe/DLSS5-Entire-Screen\">github.com/ThioJoe/DLSS5-Entire-Screen</a>", 2 },
+    { L"Source code, releases and issues: <a href=\"" DSCREEN_WIDE(DSCREEN_REPOSITORY_URL) L"\">" DSCREEN_WIDE(DSCREEN_REPOSITORY) L"</a>", 2 },
     { L"Runs the checked settings through every combination of their values, all from one frame: a strength from nothing up to where its slider is now, the passes from one up to the count.", 4 },
 } };
 
@@ -1724,7 +1725,7 @@ Result<ControlPanel, Error> CreateControlPanel(const interior::Options& options,
     };
 
     static constexpr auto CreatePanelWindow = [] [[nodiscard]] (bool topmost) noexcept -> Result<UniqueWindow, Error> {
-        HWND window = ::CreateWindowExW(topmost ? WS_EX_TOPMOST : 0u, kPanelClass, L"Full-Screen Wrapper for DLSS5 \u2014 controls", kPanelStyle, CW_USEDEFAULT, CW_USEDEFAULT, kPanelWidth,
+        HWND window = ::CreateWindowExW(topmost ? WS_EX_TOPMOST : 0u, kPanelClass, DSCREEN_WIDE(DSCREEN_PRODUCT_NAME) L" \u2014 controls", kPanelStyle, CW_USEDEFAULT, CW_USEDEFAULT, kPanelWidth,
                                         kPanelWidth, nullptr, nullptr, ::GetModuleHandleW(nullptr), nullptr);
         if (window == nullptr)
             return Fail(LastError(ApiCall::CreateWindowExW));

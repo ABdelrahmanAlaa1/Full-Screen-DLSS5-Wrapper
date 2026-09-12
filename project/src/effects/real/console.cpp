@@ -1,5 +1,7 @@
 #include "effects/real/console.h"
 
+#include "global_common.h"
+
 #include <array>
 #include <cstring>
 #include <string_view>
@@ -70,7 +72,7 @@ Result<Console, Error> OpenConsole(interior::LogLevel minimum, const interior::D
 void ShowMessage(std::string_view text) noexcept
 {
     const infra::BoundedString<char, kMessageCapacity> message = infra::BoundedString<char, kMessageCapacity>::Parse(text).value_or(infra::BoundedString<char, kMessageCapacity>{});
-    ::MessageBoxA(nullptr, message.CString(), "Full-Screen Wrapper for DLSS5", MB_OK | MB_ICONERROR);
+    ::MessageBoxA(nullptr, message.CString(), DSCREEN_PRODUCT_NAME, MB_OK | MB_ICONERROR);
 }
 
 Status<Error> Log(const Console& console, interior::LogLevel level, std::string_view text) noexcept

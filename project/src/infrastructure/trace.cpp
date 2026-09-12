@@ -1,5 +1,6 @@
 #include "infrastructure/trace.h"
 
+#include "global_common.h"
 #include "infrastructure/contracts.h"
 
 #include <array>
@@ -32,7 +33,7 @@ void DumpTrace() noexcept
         if (entry.function != nullptr)
             std::fprintf(sink, "%llu %s %p\n", static_cast<unsigned long long>(entry.sequence), Direction(entry.enter), entry.function);
     };
-    std::FILE* sink = std::fopen("FullScreenWrapperForDLSS5-trace.txt", "w");
+    std::FILE* sink = std::fopen(DSCREEN_FILE_STEM "-trace.txt", "w");
     if (sink == nullptr)
         return;
     std::fprintf(sink, "--- trace (%llu calls recorded, newest last) ---\n", static_cast<unsigned long long>(g_sequence));
@@ -44,7 +45,7 @@ void DumpTrace() noexcept
 void ContractViolation(const char* predicate, const char* file, int line) noexcept
 {
     std::fflush(stdout);
-    std::fprintf(stderr, "CONTRACT VIOLATION: %s at %s:%d (trace written to FullScreenWrapperForDLSS5-trace.txt)\n", predicate, file, line);
+    std::fprintf(stderr, "CONTRACT VIOLATION: %s at %s:%d (trace written to " DSCREEN_FILE_STEM "-trace.txt)\n", predicate, file, line);
     DumpTrace();
     std::fflush(stderr);
     std::abort();
