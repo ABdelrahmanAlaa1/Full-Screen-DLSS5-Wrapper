@@ -23,11 +23,12 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 
 ## Key Features:
 
-- Full control over internal model inputs. Including uncapped values for structure and tone.
-- Ability to selectively apply it to a specific window.
-- Built in screenshot and recording feature.
-  - Simultaneously capture both the original image/video and its processed output as separate files.
-  - The video files are perfectly synchronized frame-by-frame for easy comparison.
+- **Full control** over internal model inputs. Including uncapped values for structure and tone.
+- Ability to selectively apply it to a **specific window**.
+- Built in screenshot and recording features:
+  - **Simultaneously capture** both the original image/video and its processed output as separate files.
+    - The video files are also perfectly synchronized frame-by-frame for easy comparison.
+  - **Comparison Capture**: Automatically capture screenshots with multiple settings combinations for the same frame
 
 ## Why This Over Similar Tools?
 - It's a single `.exe` file, no installation or third party dependencies required.
