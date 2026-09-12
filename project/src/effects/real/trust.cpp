@@ -14,7 +14,6 @@
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <span>
 #include <string_view>
 #include <vector>
 
@@ -34,8 +33,6 @@ constexpr std::size_t kKeyCapacity = 64;
 // A file may carry signatures after its first, each verified on its own; one with more than this many is
 // refused rather than looped over. NVIDIA's driver files carry two: NVIDIA's own and Microsoft's.
 constexpr DWORD kMaxSecondarySignatures = 15;
-// The certificates a signer's chain is copied from, at most: a chain longer than this is not one NVIDIA signs with.
-constexpr DWORD kMaxChainCertificates = 16;
 // How long the chain build may spend on each thing it fetches, a root Microsoft lists that the machine does not hold yet above all.
 constexpr DWORD kFetchMilliseconds = 15000;
 
@@ -218,22 +215,19 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
                 };
 
                 // The signer's chain built again from two sources only, Microsoft's own root list and the
-                // certificates the signature brought with it, at the moment the signature was verified for,
+                // certificates the signature carries in its message, at the moment the signature was verified for,
                 // and asked for code signing: a root anyone put into the ordinary stores does not count, and a
                 // root on Microsoft's list that the machine does not hold yet is fetched, with a bound on the
                 // wait. Zero when the chain is clean and the base policy accepts it; otherwise the chain's
                 // trust status, the policy's error or the call's.
-                static constexpr auto RootTrouble = [] [[nodiscard]] (const CRYPT_PROVIDER_SGNR* signer, const CERT_CONTEXT* certificate) noexcept -> DWORD {
-                    // The signer's own chain less any self-signed certificate, in a store of this call's own.
-                    // A root in it would not be trusted for being there; none is put there to begin with.
-                    static constexpr auto Carried = [] [[nodiscard]] (const CRYPT_PROVIDER_SGNR* signer) noexcept -> UniqueStore {
-                        UniqueStore store(::CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr));
-                        if (store == nullptr)
-                            return store;
-                        for (const CRYPT_PROVIDER_CERT& carried : std::span(signer->pasCertChain, std::min(signer->csCertChain, kMaxChainCertificates)))
-                            if (!carried.fSelfSigned)
-                                (void)::CertAddCertificateContextToStore(store.get(), carried.pCert, CERT_STORE_ADD_REPLACE_EXISTING, nullptr);
-                        return store;
+                static constexpr auto RootTrouble = [] [[nodiscard]] (const CRYPT_PROVIDER_DATA* provider, const CRYPT_PROVIDER_SGNR* signer, const CERT_CONTEXT* certificate) noexcept -> DWORD {
+                    // The certificates the signature carries in its own message, as a store: WinTrust holds the
+                    // message it verified, the nested one when the signature is a secondary. A root among them
+                    // is not trusted for being there.
+                    static constexpr auto Carried = [] [[nodiscard]] (const CRYPT_PROVIDER_DATA* provider) noexcept -> UniqueStore {
+                        if (provider->hMsg == nullptr)
+                            return UniqueStore{};
+                        return UniqueStore(::CertOpenStore(CERT_STORE_PROV_MSG, provider->dwEncoding, 0, 0, provider->hMsg));
                     };
 
                     // WAIVER(R1): every field of the request is named, the ones that want nothing included.
@@ -274,7 +268,7 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
                             return static_cast<DWORD>(TRUST_E_FAIL);
                         return status.dwError;
                     };
-                    const UniqueStore carried = Carried(signer);
+                    const UniqueStore carried = Carried(provider);
                     if (carried == nullptr)
                         return static_cast<DWORD>(TRUST_E_SYSTEM_ERROR);
                     const Result<UniqueChain, DWORD> chain = Built(signer, certificate, carried.get());
@@ -282,11 +276,12 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
                         return chain.error();
                     return Trouble(chain->get());
                 };
-                CRYPT_PROVIDER_SGNR* signer = SignerOf(::WTHelperProvDataFromStateData(state));
+                CRYPT_PROVIDER_DATA* provider = ::WTHelperProvDataFromStateData(state);
+                CRYPT_PROVIDER_SGNR* signer = SignerOf(provider);
                 CRYPT_PROVIDER_CERT* certificate = CertificateOf(signer);
                 if (certificate == nullptr || !NamedNvidia(certificate->pCert))
                     return Found{ Signer::Other, 0 };
-                const DWORD trouble = RootTrouble(signer, certificate->pCert);
+                const DWORD trouble = RootTrouble(provider, signer, certificate->pCert);
                 if (trouble != 0)
                     return Found{ Signer::NvidiaUnrooted, trouble };
                 return Found{ Signer::Nvidia, 0 };
