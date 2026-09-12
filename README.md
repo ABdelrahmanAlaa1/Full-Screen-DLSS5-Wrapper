@@ -30,13 +30,12 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
   - The video files are perfectly synchronized frame-by-frame for easy comparison.
 
 ## Why This Over Similar Tools?
-- It's a single `.exe` file, no install or third party dependencies required (Besides the official DLSS5 dll: `nvngx_dlssnr.dll`)
+- It's a single `.exe` file, no installation or third party dependencies required.
     - It's also signed with a trusted certificate.
 - Theoretically anti-cheat false-positive safe
   - Does NOT inject itself into or modify any other applications. It reads the final screen output and processes that. (See [How It Works](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#how-it-works) explanation below)
-  - Therefore it _should_ present no more false-positive anti-cheat risk than ordinary screen-capture software or graphics-enhancement overlay software.
-  - Verifies any DLLs are the originals signed by Nvidia and unmodified before loading.
-  - It's code signed, so any anti-cheat providers could see you are running the unmodified version of the tool, which verifiably only loads official unmodified Nvidia binaries.
+    - Therefore it _should_ present no more false-positive anti-cheat risk than ordinary screen-capture software or graphics-enhancement overlay software.
+  - It's code signed, so any anti-cheat providers could see you are running the unmodified version of the tool, which verifiably loads only official signed & unmodified Nvidia binaries.
   - That being said, some anti-cheats may block overlays in general and might kick you at worst. So still best to not use it in competitive games to be safe.
 
 # Example Screenshots
@@ -99,7 +98,7 @@ On a simple level, it:
 
 For a much more detailed and technical explanation, see the [Advanced Readme](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/blob/main/Readme_Advanced.md) file  (`Readme_Advanced.md`).
 
-# Optional: Launching via Commandline
+## Optional: Launch via Commandline
 - The tool can be launched by simply double clicking the `exe` to launch the GUI, or via the command line.
 - If you launch the app from command line, it will output debug info there. There are also file logging options as CLI arguments.
 - Use the `--help` argument to see all command line options (mostly the same options as in the GUI)
