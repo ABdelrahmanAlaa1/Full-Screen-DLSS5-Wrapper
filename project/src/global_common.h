@@ -6,15 +6,15 @@
 // WAIVER(R31): the resource compiler knows only the preprocessor, so these are macros, and every use in
 // C++ is the same macro, spliced into a longer literal where the text is part of one.
 
-#define DSCREEN_VERSION_MAJOR 0
-#define DSCREEN_VERSION_MINOR 2
+#define DSCREEN_VERSION_MAJOR 1
+#define DSCREEN_VERSION_MINOR 0
 #define DSCREEN_VERSION_PATCH 0
 
 #define DSCREEN_PRODUCT_NAME "Full-Screen Wrapper for DLSS5"
 #define DSCREEN_FILE_STEM "FullScreenWrapperForDLSS5" // the executable's name, and how the files it writes beside itself begin
 #define DSCREEN_COMPANY_NAME "ThioJoe"
 #define DSCREEN_COPYRIGHT "Copyright (C) 2026 ThioJoe"
-#define DSCREEN_REPOSITORY "github.com/ThioJoe/Full-Screen-DLSS-Wrapper"
+#define DSCREEN_REPOSITORY "github.com/ThioJoe/Full-Screen-DLSS5-Wrapper"
 #define DSCREEN_REPOSITORY_URL "https://" DSCREEN_REPOSITORY
 
 // "0.2.0" from the three numbers: the argument is expanded first, then spelled out as one literal.
