@@ -17,7 +17,7 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 ## How to Download and Use
 1. Download the latest version of the `exe`. (Direct link [here](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/releases/latest/download/FullScreenWrapperForDLSS5.exe))
     - Or find it under the latest [Release](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper/releases) under "Assets"
-2. Acquire `nvngx_dlssnr.dll` and put it next to the `exe` (see [Requirements](https://github.com/ThioJoe/Full-Screen-DLSS5-Wrapper#requirements) section below)
+2. Acquire `nvngx_dlssnr.dll` (available [here](https://web.archive.org/web/20260913005530/https://release-assets.githubusercontent.com/github-production-release-asset/1172082676/74962a93-ae18-48bf-a383-772583e7035e?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-09-13T01%3A42%3A57Z&rscd=attachment%3B+filename%3Dnvngx_dlssnr_310.8.0.zip&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-09-13T00%3A42%3A07Z&ske=2026-09-13T01%3A42%3A57Z&sks=b&skv=2018-11-09&sig=gti%2BBU6awa3LBMcrIxECIGL%2FnwBAcWqSc6E5BUP5Qrs%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc4OTI2NDUyOSwibmJmIjoxNzg5MjYwOTI5LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.ljXg2tJDwLH4YMacu6QaOC3ef-QsXzFbEsx3l04Czes&response-content-disposition=attachment%3B%20filename%3Dnvngx_dlssnr_310.8.0.zip&response-content-type=application%2Foctet-stream)) and put it next to the `exe`.
 3. Run the `exe` (no installation required).
 4. By default, it applies to the primary monitor, with more options in the View tab. You can also apply it to a specific selected window.
 
@@ -77,10 +77,8 @@ Just a single `exe` (signed with a trusted certificate) written in C++ with zero
 # Requirements
 
 - You need a 50-Series Nvidia GPU and Nvidia drivers `616.64` or newer
-- You must acquire `nvngx_dlssnr.dll` yourself and put it next to the app `exe`.
-  - Just Google it, you can find people who have uploaded it like on reddit.
-  - For copyright reasons I will not host or link to it from here.
-  - Note: The app will verify the dll's signature to ensure it's the right file either way.
+- You must acquire `nvngx_dlssnr.dll` (available [here](https://web.archive.org/web/20260913005530/https://release-assets.githubusercontent.com/github-production-release-asset/1172082676/74962a93-ae18-48bf-a383-772583e7035e?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-09-13T01%3A42%3A57Z&rscd=attachment%3B+filename%3Dnvngx_dlssnr_310.8.0.zip&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-09-13T00%3A42%3A07Z&ske=2026-09-13T01%3A42%3A57Z&sks=b&skv=2018-11-09&sig=gti%2BBU6awa3LBMcrIxECIGL%2FnwBAcWqSc6E5BUP5Qrs%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc4OTI2NDUyOSwibmJmIjoxNzg5MjYwOTI5LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.ljXg2tJDwLH4YMacu6QaOC3ef-QsXzFbEsx3l04Czes&response-content-disposition=attachment%3B%20filename%3Dnvngx_dlssnr_310.8.0.zip&response-content-type=application%2Foctet-stream)) and put it next to the app `exe`.
+  - If that link stops working, you'll need to find it find it yourself through google or something. The app will verify the dll's signature to ensure it's the right file either way.
 
 ### Optional:
 - `nvngx_dlss.dll` - Enables use of super resolution options. Also put that next to the `exe`.
