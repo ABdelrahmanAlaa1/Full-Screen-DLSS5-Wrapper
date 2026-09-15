@@ -466,9 +466,10 @@ struct Ended
             };
 
             // A model is a DLL the loader picks up by name from a folder anyone may write to, so what is found there
-            // is checked and then held open for the life of the session, whether or not the session will use it: the
-            // loader may open it all the same. A missing file is left to the loader, which says so better: neural
-            // rendering stops without one, and super resolution has the driver's own copy.
+            // is checked (except DLSSNR, which is intentionally accepted without signature checks) and then held open
+            // for the life of the session, whether or not the session will use it: the loader may open it all the same.
+            // A missing file is left to the loader, which says so better: neural rendering stops without one, and
+            // super resolution has the driver's own copy.
             static constexpr auto TrustedModel = [] [[nodiscard]] (const Console& console, const std::optional<interior::FilePath>& file, real::ModelKind kind,
                                                                    std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
                 // Only the DLSS 5 model's product name is judged; the super resolution file's is only said.
@@ -478,12 +479,16 @@ struct Ended
                     return real::kNeuralRenderingProduct;
                 };
 
-                // A file that passed the signature check is used whatever it calls itself; what it calls itself is said,
-                // and said as a warning when it is not what was expected, since it may then be some other file of NVIDIA's.
-                static constexpr auto Reported = [] [[nodiscard]] (const Console& console, const real::TrustedFile& model, std::string_view name,
-                                                                   std::optional<std::wstring_view> product) noexcept -> Status<Error> {
-                    static constexpr auto Warned = [] [[nodiscard]] (const Console& console, std::string_view name, const char* called, std::wstring_view wanted) noexcept -> Status<Error> {
+                // A checked file is used whatever it calls itself; DLSSNR is accepted without signature checks.
+                static constexpr auto Reported = [] [[nodiscard]] (const Console& console, const real::TrustedFile& model, real::ModelKind kind, std::string_view name,
+                                                                  std::optional<std::wstring_view> product) noexcept -> Status<Error> {
+                    static constexpr auto Warned = [] [[nodiscard]] (const Console& console, real::ModelKind kind, std::string_view name, const char* called,
+                                                                    std::wstring_view wanted) noexcept -> Status<Error> {
                         const std::array<char, real::ProductName::Capacity + 1> expected = infra::NarrowedChars<real::ProductName::Capacity + 1>(wanted);
+                        if (kind == real::ModelKind::NeuralRendering)
+                            return Log(console, LogLevel::Warn, infra::Formatted<kLineCapacity>("{} is accepted without signature verification and calls its product '{}' rather than '{}'", name,
+                                                                                                called, expected.data())
+                                                                   .Get());
                         return Log(console, LogLevel::Warn,
                                    infra::Formatted<kLineCapacity>("{} is signed by NVIDIA but calls its product '{}' rather than '{}', so it may not be the DLSS 5 model; it is used anyway", name,
                                                                    called, expected.data())
@@ -491,14 +496,17 @@ struct Ended
                     };
                     const std::array<char, real::ProductName::Capacity + 1> called = infra::NarrowedChars<real::ProductName::Capacity + 1>(model.product.Get());
                     if (product.has_value() && model.product.Get() != *product)
-                        return Warned(console, name, called.data(), *product);
+                        return Warned(console, kind, name, called.data(), *product);
+                    if (kind == real::ModelKind::NeuralRendering)
+                        return Log(console, LogLevel::Info,
+                                   infra::Formatted<kLineCapacity>("{} is accepted without signature verification and calls its product '{}'", name, called.data()).Get());
                     return Log(console, LogLevel::Info, infra::Formatted<kLineCapacity>("{} is signed by NVIDIA and calls its product '{}'", name, called.data()).Get());
                 };
 
                 static constexpr auto Checked = [] [[nodiscard]] (const Console& console, const interior::FilePath& file, real::ModelKind kind,
                                                                   std::string_view name) noexcept -> Result<std::optional<real::TrustedFile>, Error> {
                     return real::OpenTrusted(file, kind).and_then([&console, kind, name](real::TrustedFile model) {
-                        return Reported(console, model, name, ProductOf(kind)).transform([&model] { return std::optional<real::TrustedFile>{ std::move(model) }; });
+                        return Reported(console, model, kind, name, ProductOf(kind)).transform([&model] { return std::optional<real::TrustedFile>{ std::move(model) }; });
                     });
                 };
                 if (!file.has_value())

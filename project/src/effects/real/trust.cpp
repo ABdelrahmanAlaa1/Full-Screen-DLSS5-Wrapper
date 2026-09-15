@@ -334,8 +334,10 @@ Result<TrustedFile, Error> OpenTrusted(const interior::FilePath& path, ModelKind
         WINTRUST_FILE_INFO file = FileInfoFor(path, handle);
         return Checked(&file, 0, WSS_VERIFY_SPECIFIC | WSS_GET_SECONDARY_SIG_COUNT, kind).and_then([&file, kind](const Signature& first) { return Rest(&file, first, kind); });
     };
-    // The product name is read only of a file that has passed, and says nothing about whether it passed.
+    // The DLSSNR model is accepted as-is so modded builds can load; the others must still pass signature checks.
     return OpenForReading(path.CString(), kind).and_then([&path, kind](UniqueHandle handle) {
+        if (kind == ModelKind::NeuralRendering)
+            return TrustedFile{ std::move(handle), ProductNameOf(path.CString()) };
         return Verified(path.CString(), handle.get(), kind).transform([&path, &handle] { return TrustedFile{ std::move(handle), ProductNameOf(path.CString()) }; });
     });
 }
